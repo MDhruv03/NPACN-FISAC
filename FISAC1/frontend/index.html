@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Location Protocol</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="status-indicator">
+                <div class="dot disconnected" id="connection-dot"></div>
+                <span id="connection-status">Disconnected</span>
+            </div>
+            <h1>Location Protocol</h1>
+            <p class="subtitle">Real-time symmetric broadcasting</p>
+        </header>
+
+        <main>
+            <div class="controls">
+                <button id="toggle-location-btn" class="btn primary" disabled>Connect & Share Location</button>
+            </div>
+
+            <div class="map-grid" id="map-grid">
+                <!-- Relative coordinate system grid will be generated here -->
+                <div class="grid-overlay"></div>
+            </div>
+
+            <div class="logs" id="logs">
+                <div class="log-entry system">System initialized. Awaiting connection...</div>
+            </div>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

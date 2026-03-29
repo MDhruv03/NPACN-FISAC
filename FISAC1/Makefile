@@ -1,20 +1,20 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -I./include -g
-LDFLAGS = -lm
+LDFLAGS = -lws2_32
 
 SRC_DIR = src
 INC_DIR = include
 OBJ_DIR = obj
 
-SRCS = $(wildcard $(SRC_DIR)/*.c)
-OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SRCS))
+APP_SRCS = $(wildcard $(SRC_DIR)/*.c)
+APP_OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(APP_SRCS))
 
 TARGET = server
 
-all: $(TARGET)
+all: clean $(TARGET)
 
-$(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+$(TARGET): $(APP_OBJS)
+	$(CC) -o $@ $^ $(LDFLAGS)
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -23,6 +23,6 @@ $(OBJ_DIR):
 	mkdir $(OBJ_DIR)
 
 clean:
-	rm -rf $(OBJ_DIR) $(TARGET)
+	rmdir /s /q $(OBJ_DIR) 2>nul || del /q $(TARGET).exe 2>nul
 
 .PHONY: all clean

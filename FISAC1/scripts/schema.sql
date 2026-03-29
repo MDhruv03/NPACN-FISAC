@@ -1,42 +1,44 @@
--- schema.sql
+-- schema.sql (SQLite3 compatible)
+-- This schema is automatically created by the C server's db_init() function.
+-- This file serves as documentation and can be used for manual database inspection.
 
 -- Users table
-CREATE TABLE users (
-    id SERIAL PRIMARY KEY,
-    username VARCHAR(50) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- Locations table
-CREATE TABLE locations (
-    id SERIAL PRIMARY KEY,
+-- Locations table (stores every location update with timestamp)
+CREATE TABLE IF NOT EXISTS locations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
-    latitude DOUBLE PRECISION NOT NULL,
-    longitude DOUBLE PRECISION NOT NULL,
-    timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    latitude REAL NOT NULL,
+    longitude REAL NOT NULL,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- Sessions table
-CREATE TABLE sessions (
-    id SERIAL PRIMARY KEY,
+-- Sessions table (tracks authenticated sessions)
+CREATE TABLE IF NOT EXISTS sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
-    session_token VARCHAR(255) UNIQUE NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    expires_at TIMESTAMP WITH TIME ZONE NOT NULL
+    session_token TEXT UNIQUE NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME NOT NULL
 );
 
--- Logs table
-CREATE TABLE logs (
-    id SERIAL PRIMARY KEY,
-    level VARCHAR(20) NOT NULL,
+-- Logs table (system event log / syslog)
+CREATE TABLE IF NOT EXISTS logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    level TEXT NOT NULL,
     message TEXT NOT NULL,
-    timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- Indexes for faster queries
-CREATE INDEX idx_locations_user_id ON locations(user_id);
-CREATE INDEX idx_locations_timestamp ON locations(timestamp);
-CREATE INDEX idx_sessions_user_id ON sessions(user_id);
-CREATE INDEX idx_logs_level ON logs(level);
-CREATE INDEX idx_logs_timestamp ON logs(timestamp);
+-- Indexes for fast queries
+CREATE INDEX IF NOT EXISTS idx_locations_user ON locations(user_id);
+CREATE INDEX IF NOT EXISTS idx_locations_ts ON locations(timestamp);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_logs_level ON logs(level);
+CREATE INDEX IF NOT EXISTS idx_logs_ts ON logs(timestamp);

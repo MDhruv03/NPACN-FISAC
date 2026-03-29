@@ -3,39 +3,161 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Location Protocol</title>
+    <meta name="description" content="Real-time location sharing web application using WebSockets and TCP socket programming">
+    <title>GeoSync — Real-Time Location Sharing</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <div class="status-indicator">
-                <div class="dot disconnected" id="connection-dot"></div>
-                <span id="connection-status">Disconnected</span>
+    <!-- Auth Modal Overlay -->
+    <div class="auth-overlay" id="auth-overlay">
+        <div class="auth-card">
+            <div class="auth-header">
+                <div class="auth-logo">
+                    <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+                        <circle cx="16" cy="16" r="14" stroke="url(#grad1)" stroke-width="2"/>
+                        <circle cx="16" cy="13" r="4" fill="url(#grad1)"/>
+                        <path d="M16 17C16 17 8 20 8 25H24C24 20 16 17 16 17Z" fill="url(#grad1)" opacity="0.6"/>
+                        <defs>
+                            <linearGradient id="grad1" x1="0" y1="0" x2="32" y2="32">
+                                <stop offset="0%" stop-color="#6ee7b7"/>
+                                <stop offset="100%" stop-color="#3b82f6"/>
+                            </linearGradient>
+                        </defs>
+                    </svg>
+                </div>
+                <h2>GeoSync</h2>
+                <p class="auth-subtitle">Real-time location sharing protocol</p>
             </div>
-            <h1>Location Protocol</h1>
-            <p class="subtitle">Real-time symmetric broadcasting</p>
-        </header>
 
-        <main>
-            <div class="controls">
-                <button id="toggle-location-btn" class="btn primary" disabled>Connect & Share Location</button>
+            <div class="auth-tabs">
+                <button class="auth-tab active" id="tab-login" onclick="switchTab('login')">Sign In</button>
+                <button class="auth-tab" id="tab-register" onclick="switchTab('register')">Register</button>
             </div>
 
-            <div class="map-grid" id="map-grid">
-                <!-- Relative coordinate system grid will be generated here -->
-                <div class="grid-overlay"></div>
+            <form id="auth-form" onsubmit="return handleAuth(event)">
+                <div class="input-group">
+                    <label for="auth-username">Username</label>
+                    <input type="text" id="auth-username" placeholder="Enter username" required autocomplete="username" minlength="2" maxlength="50">
+                </div>
+                <div class="input-group">
+                    <label for="auth-password">Password</label>
+                    <input type="password" id="auth-password" placeholder="Enter password" required autocomplete="current-password" minlength="3">
+                </div>
+                <button type="submit" class="auth-submit" id="auth-submit-btn">
+                    <span id="auth-btn-text">Sign In</span>
+                    <div class="spinner" id="auth-spinner" style="display:none"></div>
+                </button>
+                <p class="auth-error" id="auth-error"></p>
+                <div class="auth-hint">
+                    <p>Demo accounts: <code>user1/pass1</code>, <code>user2/pass2</code></p>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Main Application -->
+    <div class="app" id="app" style="display:none">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="brand">
+                    <svg width="24" height="24" viewBox="0 0 32 32" fill="none">
+                        <circle cx="16" cy="16" r="14" stroke="url(#grad2)" stroke-width="2"/>
+                        <circle cx="16" cy="13" r="4" fill="url(#grad2)"/>
+                        <path d="M16 17C16 17 8 20 8 25H24C24 20 16 17 16 17Z" fill="url(#grad2)" opacity="0.6"/>
+                        <defs>
+                            <linearGradient id="grad2" x1="0" y1="0" x2="32" y2="32">
+                                <stop offset="0%" stop-color="#6ee7b7"/>
+                                <stop offset="100%" stop-color="#3b82f6"/>
+                            </linearGradient>
+                        </defs>
+                    </svg>
+                    <span>GeoSync</span>
+                </div>
+                <div class="status-badge" id="status-badge">
+                    <div class="status-dot disconnected" id="connection-dot"></div>
+                    <span id="connection-status">Connecting</span>
+                </div>
             </div>
 
-            <div class="logs" id="logs">
-                <div class="log-entry system">System initialized. Awaiting connection...</div>
+            <div class="sidebar-section">
+                <h3>Your Position</h3>
+                <div class="coord-display">
+                    <div class="coord-row">
+                        <span class="coord-label">LAT</span>
+                        <span class="coord-value" id="my-lat">—</span>
+                    </div>
+                    <div class="coord-row">
+                        <span class="coord-label">LON</span>
+                        <span class="coord-value" id="my-lon">—</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <h3>Online Users <span class="user-count" id="user-count">0</span></h3>
+                <div class="user-list" id="user-list">
+                    <div class="empty-state">No other users online</div>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <h3>Network</h3>
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <span class="stat-label">Latency</span>
+                        <span class="stat-value" id="stat-latency">—</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">TX</span>
+                        <span class="stat-value" id="stat-tx">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">RX</span>
+                        <span class="stat-value" id="stat-rx">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Uptime</span>
+                        <span class="stat-value" id="stat-uptime">0s</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sidebar-section logs-section">
+                <h3>Event Log</h3>
+                <div class="logs" id="logs">
+                    <div class="log-entry system">System initialized.</div>
+                </div>
+            </div>
+
+            <div class="sidebar-footer">
+                <button class="btn-disconnect" id="btn-disconnect" onclick="disconnect()">
+                    Sign Out
+                </button>
+                <span class="user-badge" id="user-badge">—</span>
+            </div>
+        </aside>
+
+        <!-- Map Area -->
+        <main class="map-container">
+            <div id="map"></div>
+            <button class="btn-recenter" id="btn-recenter" onclick="recenterMap()" title="Re-center map">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
+                </svg>
+            </button>
+            <div class="map-overlay-info" id="map-info">
+                <span id="map-zoom-level">Zoom: —</span>
             </div>
         </main>
     </div>
 
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

@@ -7,12 +7,13 @@ app = Flask(__name__, static_folder='../frontend', static_url_path='/')
 DB_PATH = 'fisac.db'
 
 def hash_password(password):
-    # Match the djb2 hash algorithm from previous C implementation
-    # djb2 is simple enough to implement exactly.
+    # Match the djb2 hash in database.c exactly.
+    # On Windows 64-bit (LLP64), C's `unsigned long` is typically 32 bits.
+    # We must truncate to 32 bits to match the C server's behavior.
     hash_val = 5381
     for c in password:
         hash_val = ((hash_val << 5) + hash_val) + ord(c)
-        hash_val &= 0xFFFFFFFF  # 32-bit truncation
+        hash_val &= 0xFFFFFFFF  # 32-bit truncation per Windows unsigned long
     return f"{hash_val:016x}"
 
 def get_db():
@@ -23,13 +24,8 @@ def get_db():
     return conn
 
 def init_db():
-    with get_db() as conn:
-        # Drop legacy tables to avoid schema and hash mismatches from earlier C executions
-        conn.execute("DROP TABLE IF EXISTS locations")
-        conn.execute("DROP TABLE IF EXISTS logs")
-        conn.execute("DROP TABLE IF EXISTS users")
-        conn.commit()
-
+    # Do NOT drop tables — that would wipe all registered users on every restart.
+    # Just ensure the schema exists and demo users are seeded.
     schema = """
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,7 +49,7 @@ def init_db():
     """
     with get_db() as conn:
         conn.executescript(schema)
-        # Seed test users
+        # Seed demo users — INSERT OR IGNORE means existing accounts are preserved
         try:
             conn.execute("INSERT OR IGNORE INTO users (username, password_hash) VALUES (?, ?)", ("user1", hash_password("pass1")))
             conn.execute("INSERT OR IGNORE INTO users (username, password_hash) VALUES (?, ?)", ("user2", hash_password("pass2")))
@@ -149,8 +145,5 @@ if __name__ == '__main__':
     print("Initializing Database...")
     init_db()
     print("Starting Flask DB Backend on port 5000...")
-    # Run silently to avoid cluttering the parent terminal
-    import logging
-    log = logging.getLogger('werkzeug')
-    log.setLevel(logging.ERROR)
+    # Enable logging for debugging
     app.run(host='127.0.0.1', port=5000)

@@ -1,7 +1,23 @@
 /* ============================
    GeoSync — Client Application
-   Real-time Location Sharing
-   ============================ */
+
+/* ---- Global Error Capture ---- */
+window.onerror = function(msg, url, lineNo, columnNo, error) {
+    const string = msg.toLowerCase();
+    const substring = "script error";
+    if (string.indexOf(substring) > -1) {
+        log('Global Error: Script Error (see browser console)', 'err');
+    } else {
+        const message = [
+            'Message: ' + msg,
+            'Line: ' + lineNo,
+            'Column: ' + columnNo,
+            'Error object: ' + JSON.stringify(error)
+        ].join(' - ');
+        log('JS ERROR: ' + msg + ' (Line: ' + lineNo + ')', 'err');
+    }
+    return false;
+};
 
 /* ---- State ---- */
 
@@ -121,7 +137,7 @@ function connectAndAuth(username, password) {
     ws = new WebSocket('ws://localhost:8080');
 
     ws.onopen = () => {
-        log('WebSocket connected.', 'system');
+        log('WebSocket connected. Sending auth request...', 'system');
         /* Send auth or register message */
         const msg = {
             type: authMode === 'register' ? 'register' : 'auth',
@@ -129,7 +145,7 @@ function connectAndAuth(username, password) {
         };
         ws.send(JSON.stringify(msg));
         txCount++;
-        log(`Sent ${msg.type.toUpperCase()} request`, 'tx');
+        log(`Sent ${msg.type.toUpperCase()} request to server.`, 'tx');
     };
 
     ws.onmessage = (e) => {
@@ -143,16 +159,18 @@ function connectAndAuth(username, password) {
         }
     };
 
-    ws.onerror = () => {
-        log('WebSocket error.', 'err');
+    ws.onerror = (err) => {
+        console.error('WS Error:', err);
+        log('WebSocket error: Could not reach server.', 'err');
         UI.authError.textContent = 'Connection failed. Is the server running?';
         resetAuthButton();
     };
 
-    ws.onclose = () => {
+    ws.onclose = (code) => {
         updateConnectionState(STATE.DISCONNECTED);
-        log('Connection closed.', 'system');
+        log(`Connection closed (code: ${code.code}).`, 'system');
         stopSharing();
+        resetAuthButton(); // Ensure button is clickable again
         if (connectTime) {
             clearInterval(uptimeInterval);
             connectTime = null;
@@ -171,6 +189,7 @@ function resetAuthButton() {
 function handleServerMessage(data) {
     switch (data.type) {
         case 'auth_response':
+            log(`Received AUTH_RESPONSE from server.`, 'rx');
             handleAuthResponse(data.payload);
             break;
         case 'location':
@@ -185,35 +204,45 @@ function handleServerMessage(data) {
 }
 
 function handleAuthResponse(payload) {
-    if (payload.success) {
-        myUsername = payload.username;
-        myUserId = payload.user_id;
-        UI.authError.textContent = '';
+    try {
+        if (payload.success) {
+            myUsername = payload.username;
+            myUserId = payload.user_id;
+            UI.authError.textContent = '';
 
-        /* Transition to main app */
-        UI.authOverlay.style.display = 'none';
-        UI.app.style.display = 'flex';
-        UI.userBadge.textContent = myUsername;
+            /* Transition to main app */
+            UI.authOverlay.style.display = 'none';
+            UI.app.style.display = 'flex';
+            UI.userBadge.textContent = myUsername;
 
-        updateConnectionState(STATE.CONNECTED);
-        log(`Authenticated as ${myUsername}`, 'system');
+            updateConnectionState(STATE.CONNECTED);
+            log(`Authenticated as ${myUsername}`, 'system');
 
-        /* Initialize map */
-        initMap();
+            /* Initialize map */
+            if (typeof L === 'undefined') {
+                log('CRITICAL: Leaflet library (L) not loaded!', 'err');
+                return;
+            }
+            initMap();
 
-        /* Start sharing location */
-        startSharing();
+            /* Start sharing location */
+            startSharing();
 
-        /* Start uptime counter */
-        connectTime = Date.now();
-        uptimeInterval = setInterval(updateUptime, 1000);
+            /* Start uptime counter */
+            connectTime = Date.now();
+            uptimeInterval = setInterval(updateUptime, 1000);
 
-        /* Subscribe to location channel */
-        sendMessage({ type: 'subscribe', payload: { channel: 'locations' } });
-    } else {
-        UI.authError.textContent = payload.message || 'Authentication failed';
+            /* Subscribe to location channel */
+            sendMessage({ type: 'subscribe', payload: { channel: 'locations' } });
+        } else {
+            UI.authError.textContent = payload.message || 'Authentication failed';
+            resetAuthButton();
+            log(`Auth failed: ${payload.message}`, 'err');
+        }
+    } catch (err) {
+        log(`Transition Error: ${err.message}`, 'err');
+        console.error(err);
         resetAuthButton();
-        log(`Auth failed: ${payload.message}`, 'err');
     }
 }
 

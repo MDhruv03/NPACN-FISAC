@@ -24,7 +24,9 @@
 static void send_json_response(SOCKET sock, cJSON *json) {
     char *str = cJSON_PrintUnformatted(json);
     if (str) {
-        websocket_frame_send(sock, str, (uint64_t)strlen(str), 1);
+        if (websocket_frame_send(sock, str, (uint64_t)strlen(str), 1) == -1) {
+            fprintf(stderr, "[PROTO] Failed to send JSON response to socket %lld\n", (long long)sock);
+        }
         free(str);
     }
 }
@@ -60,7 +62,9 @@ static void handle_auth(ClientInfo *client, cJSON *payload) {
     int success = 0;
     int user_id = -1;
 
+    printf("[AUTH] Sending POST /auth to Python service...\n");
     if (http_post_json("/auth", req_json, resp_json, sizeof(resp_json)) == 0) {
+        printf("[AUTH] Received response from Python service.\n");
         cJSON *parsed_resp = cJSON_Parse(resp_json);
         if (parsed_resp) {
             cJSON *succ = cJSON_GetObjectItem(parsed_resp, "success");
@@ -140,7 +144,9 @@ static void handle_register(ClientInfo *client, cJSON *payload) {
     int user_id = -1;
     char error_msg[256] = "Registration failed";
 
+    printf("[REG] Sending POST /register to Python service...\n");
     if (http_post_json("/register", req_json, resp_json, sizeof(resp_json)) == 0) {
+        printf("[REG] Received response from Python service.\n");
         cJSON *parsed_resp = cJSON_Parse(resp_json);
         if (parsed_resp) {
             cJSON *succ = cJSON_GetObjectItem(parsed_resp, "success");

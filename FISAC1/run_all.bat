@@ -12,11 +12,9 @@ cd /d "%~dp0"
 echo [0/3] Stopping existing services...
 echo ------------------------------------------------
 taskkill /f /im server.exe >nul 2>&1
-:: Use caution killing python, only target ones with our script if possible, or just kill all.
-:: To be safe and quick for this assignment env, we'll terminate the specific window if we couldn't hide it, 
-:: but since we used /b, we might have orphaned it. We'll try to forcefully free the ports.
 FOR /F "tokens=5" %%T IN ('netstat -ano ^| findstr :5000') DO taskkill /f /pid %%T >nul 2>&1
 FOR /F "tokens=5" %%T IN ('netstat -ano ^| findstr :8080') DO taskkill /f /pid %%T >nul 2>&1
+timeout /t 1 /nobreak > nul
 
 echo [1/3] Compiling the C WebSocket Server...
 echo ------------------------------------------------
@@ -33,7 +31,7 @@ gcc -Wall -Wextra -I./include -g -c src/sha1.c -o obj/sha1.o
 gcc -Wall -Wextra -I./include -g -c src/base64.c -o obj/base64.o
 gcc -Wall -Wextra -I./include -g -c src/cJSON.c -o obj/cJSON.o
 
-:: Link the object files together, enumerating them to avoid wildcard issues
+:: Link (database.c is Python-backed; no sqlite needed in the C binary)
 gcc -o server.exe obj/main.o obj/server.o obj/socket.o obj/network.o obj/websocket.o obj/protocol.o obj/http_client.o obj/sha1.o obj/base64.o obj/cJSON.o -lws2_32
 
 if %errorlevel% neq 0 (
@@ -53,26 +51,45 @@ echo.
 
 echo [2/3] Starting Services...
 echo ------------------------------------------------
-start "" /b python scripts\service.py > nul 2>&1
-echo [OK] Python DB Backend started.
-timeout /t 2 /nobreak > nul
 
-start "" /b server.exe > nul 2>&1
-echo [OK] C Server started.
+:: Check for python interpreter
+set PYTHON_CMD=python
+where py >nul 2>&1
+if %errorlevel% equ 0 set PYTHON_CMD=py
 
-timeout /t 2 /nobreak > nul
+echo [INFO] Using %PYTHON_CMD% to start backend.
+
+:: Redirect output to HIDDEN files to keep the desktop clean as requested
+del .backend.log >nul 2>&1
+del .server.log >nul 2>&1
+
+:: Generate VBScript to launch processes completely detached from this console
+echo Set WshShell = CreateObject("WScript.Shell") > start_bg.vbs
+echo WshShell.Run "cmd /c ""%PYTHON_CMD% scripts\service.py > .backend.log 2>&1""", 0, False >> start_bg.vbs
+echo WshShell.Run "cmd /c ""server.exe > .server.log 2>&1""", 0, False >> start_bg.vbs
+
+:: Execute the VBScript
+wscript start_bg.vbs
+echo [OK] Background services launched completely silently.
+
+:: Give services time to start up
+timeout /t 3 /nobreak > nul
 
 echo.
 echo [3/3] Opening Frontend...
 echo ------------------------------------------------
+:: Open Flask-served URL
 start "" "http://localhost:5000/"
 echo [OK] Frontend opened in default browser.
 
 echo.
 echo ================================================
 echo   Setup Complete!
-echo   - Backend: localhost:5000
-echo   - WebSockets: ws://localhost:8080
-echo   - GUI: browser
+echo   Flask backend: http://localhost:5000
+echo   WebSocket:     ws://localhost:8080
+echo   Login:         user1/pass1 or user2/pass2
 echo ================================================
+echo.
+echo TIP: If login sticks on "Connecting", check the Python window.
+echo TIP: If WebSocket fails, check the C Server window.
 pause

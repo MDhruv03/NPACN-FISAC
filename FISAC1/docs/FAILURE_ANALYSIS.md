@@ -1,64 +1,79 @@
 # Failure Analysis
 
-This document outlines potential failure scenarios for the real-time location sharing application and describes the mitigation strategies that have been implemented or could be implemented.
+This document outlines potential failure scenarios for the real-time location sharing application and describes the mitigation strategies implemented.
 
 ## System Description
 
 The system consists of:
-- A C-based WebSocket server that handles client connections.
-- A Python service that processes data and interacts with the database.
-- A PostgreSQL database for data storage.
-- WebSocket clients that send location data.
+- A C-based WebSocket server using WinSock2 with `select()` I/O multiplexing
+- Embedded SQLite3 database for persistent storage
+- WebSocket clients (web browsers) that send location data
+- Leaflet.js frontend for real-time map visualization
 
 ---
 
 ## Failure Scenarios
 
-### 1. Client Crash
+### 1. Client Crash (Sudden Disconnection)
 
-*   **Scenario**: A client application crashes or the underlying OS terminates it. The TCP connection is not gracefully closed.
+*   **Scenario**: A client application crashes or the underlying OS terminates it. The TCP connection is not gracefully closed — no FIN packet is sent.
+*   **TCP State**: The server-side socket remains in ESTABLISHED but the peer is gone. This is a "half-open" connection.
 *   **Mitigation**:
-    *   **`SO_KEEPALIVE`**: The `SO_KEEPALIVE` socket option is enabled on the server. This allows the server to detect unresponsive clients and close the dead connections, freeing up resources.
-    *   **Code-Level Fix**: The server's `select()` loop will eventually detect that the client socket is no longer readable. The `robust_recv()` function will return 0, indicating that the connection has been closed. The server then cleans up the client's resources.
+    *   **`SO_KEEPALIVE`**: Enabled on the server socket. The Windows TCP stack sends periodic keep-alive probes after the idle timeout. If no response is received after the configured number of probes, the connection is marked dead and `select()` will signal the socket as readable with a recv() returning 0.
+    *   **`select()` detection**: When `select()` flags a dead socket and `recv()` returns 0 or `WSAECONNRESET`, the server calls `closesocket()` and clears the client slot.
+    *   **Code**: `server.c` lines in the client data handling section check for `len <= 0` and clean up the slot.
 
 ### 2. Network Congestion
 
-*   **Scenario**: The network between the client and server becomes congested, leading to packet loss and delays.
+*   **Scenario**: The network between client and server becomes congested, leading to packet loss and delays.
+*   **TCP State**: The TCP window size shrinks (zero window), triggering TCP flow control. Packets are retransmitted.
 *   **Mitigation**:
-    *   **`SO_RCVBUF`**: The server's receive buffer size has been increased to handle bursts of incoming data, which can help during periods of network congestion.
-    *   **Robust I/O**: The `robust_send()` and `robust_recv()` functions are designed to handle partial transmissions, which can occur during network congestion. They will continue to read/write until the entire message is transmitted.
-    *   **Client-Side Buffering**: Clients could implement a local buffer to store location updates that cannot be sent due to network congestion. They can then be sent later when the network recovers.
+    *   **`SO_RCVBUF = 128KB`**: Increased from the default 8KB to absorb traffic bursts. During load tests with many concurrent clients, the extra buffer prevents TCP from advertising a zero window.
+    *   **`robust_send()`**: Handles `WSAEWOULDBLOCK` by retrying with a small sleep, accommodating temporary send buffer fullness.
+    *   **`robust_recv()`**: Returns `-1` on `WSAEWOULDBLOCK` (non-blocking), allowing the `select()` loop to continue processing other clients without blocking.
+    *   **Client-side**: The WebSocket API handles TCP-level retransmission transparently.
 
 ### 3. Partial Transmission
 
-*   **Scenario**: The server receives only a part of a WebSocket frame in a single `recv()` call.
+*   **Scenario**: `send()` or `recv()` returns fewer bytes than requested. This is normal TCP behavior — TCP is a stream protocol with no inherent message boundaries.
 *   **Mitigation**:
-    *   **`robust_recv()`**: The `robust_recv()` function is designed to handle this scenario. The `websocket_frame_recv()` function will repeatedly call `robust_recv()` until the full frame has been received, based on the payload length specified in the WebSocket frame header.
-    *   **Code-Level Fix**: The `websocket_frame_recv` function reads the frame header to determine the expected payload size, and then continues to read from the socket until all the expected bytes have been received.
+    *   **`robust_send()`** in `network.c`: Loops until all `len` bytes are transmitted, handling `WSAEWOULDBLOCK` with a retry.
+    *   **`websocket_frame_recv()`** in `websocket.c`: First reads the 2-byte frame header to determine payload length, then loops recv() until the exact payload length is received. This ensures complete WebSocket frames are always processed.
+    *   **`robust_recv()`**: Single `recv()` call with error code classification. The WebSocket layer calls it repeatedly as needed.
 
-### 4. Unauthorized Access
+### 4. Unauthorized Access Attempts
 
-*   **Scenario**: An unauthenticated or malicious user attempts to connect to the server or send data.
+*   **Scenario**: An unauthenticated or malicious user attempts to send location data or other privileged messages.
 *   **Mitigation**:
-    *   **Authentication Protocol**: The message protocol includes an `auth` message type. The server should implement logic to verify user credentials against the `users` table in the database.
-    *   **Session Management**: After a user is authenticated, the server should generate a session token and send it to the client. The client must then include this token in all subsequent messages. The server would validate this token before processing any message.
-    *   **Code-Level Fix (Not Yet Implemented)**:
-        1.  In `protocol.c`, the `handle_message` function for the `auth` message type should be updated to query the database and verify the password hash.
-        2.  A new table for sessions should be used to store and validate session tokens.
-        3.  The server should maintain a state for each client, indicating whether they are authenticated or not. Unauthenticated clients should only be allowed to send `auth` messages.
+    *   **Per-client auth state**: Each `ClientInfo` struct tracks an `authenticated` flag. Initially 0.
+    *   **Auth-gated message processing**: In `protocol.c`, `handle_message()` only allows `auth` and `register` messages from unauthenticated clients. All other message types receive an `error` response.
+    *   **Password hashing**: Passwords are hashed (djb2) before storage. Plaintext passwords are never stored.
+    *   **Auth failure logging**: Failed login attempts are logged to the database for audit.
 
 ### 5. Database Unavailability
 
-*   **Scenario**: The Python service is unable to connect to the PostgreSQL database.
+*   **Scenario**: SQLite3 encounters an error (disk full, corruption, locked).
 *   **Mitigation**:
-    *   **Connection Pooling**: The Python service uses a connection pool to manage database connections. This makes the system more resilient to transient database connection issues.
-    *   **Error Logging**: The Python service logs all database errors. This is crucial for diagnosing and fixing database-related problems.
-    *   **Retry Logic**: The Python service could be enhanced with retry logic. If a database write fails, the service could attempt to retry the operation a few times with an exponential backoff.
+    *   **WAL mode**: SQLite is configured with Write-Ahead Logging for better concurrency. Reads don't block writes.
+    *   **Error checking**: All `sqlite3_step()` calls check return codes and log errors.
+    *   **Non-fatal failures**: Database write failures (e.g., location inserts) are logged but don't crash the server. The WebSocket relay continues operating.
+    *   **Atomic transactions**: SQLite3 provides ACID compliance, ensuring database consistency even after abnormal shutdown.
 
-### 6. C Server to Python Service Communication Failure
+### 6. High Update Frequency (DoS-like behavior)
 
-*   **Scenario**: The C server is unable to send data to the Python service.
+*   **Scenario**: A client sends location updates at an extremely high rate (100s per second), overwhelming the server.
 *   **Mitigation**:
-    *   **Asynchronous Communication**: The C server sends data to the Python service asynchronously. The `http_post` function is non-blocking, so a failure to connect to the Python service will not block the main server loop.
-    *   **Error Logging**: The C server should be updated to log errors from the `http_post` function. This would provide visibility into communication failures between the two services.
-    *   **Local Caching/Queueing**: For higher reliability, the C server could implement a local cache or queue for messages that fail to be sent to the Python service. It could then retry sending them later.
+    *   **Non-blocking I/O**: The `select()`-based architecture processes messages as fast as possible without blocking other clients.
+    *   **SQLite batching**: WAL mode allows concurrent writes without locking the database.
+    *   **`SO_RCVBUF`**: The 128KB receive buffer absorbs burst traffic without dropping data at the TCP level.
+    *   **Future improvement**: Rate limiting per client (e.g., max 10 updates/second) could be added.
+
+### 7. Server Crash / Restart
+
+*   **Scenario**: The server process crashes or is restarted.
+*   **TCP State**: All server-side sockets close. Clients see connection reset (WSAECONNRESET). Server-side ports enter TIME_WAIT for 2*MSL (~60s).
+*   **Mitigation**:
+    *   **`SO_REUSEADDR`**: Enabled on the server socket. This allows the server to bind to port 8080 immediately after restart, even if sockets from the previous instance are still in TIME_WAIT.
+    *   **SQLite persistence**: All previously stored data survives the crash. The database file (`fisac.db`) is intact due to WAL journaling.
+    *   **Client reconnection**: The frontend can be refreshed to reconnect.
+    *   **Signal handler**: `signal(SIGINT, ...)` in `main.c` handles Ctrl+C for graceful shutdown with proper resource cleanup.

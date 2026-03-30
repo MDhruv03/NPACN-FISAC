@@ -1,110 +1,149 @@
-# service.py
-
-from flask import Flask, request, jsonify
-import psycopg2
-from psycopg2 import pool
-import logging
+import sqlite3
 import os
+import hashlib
+from flask import Flask, request, jsonify, send_from_directory
 
-# --- Configuration ---
-DB_NAME = os.environ.get("DB_NAME", "fisac")
-DB_USER = os.environ.get("DB_USER", "postgres")
-DB_PASSWORD = os.environ.get("DB_PASSWORD", "password")
-DB_HOST = os.environ.get("DB_HOST", "localhost")
-DB_PORT = os.environ.get("DB_PORT", "5432")
+app = Flask(__name__, static_folder='../frontend', static_url_path='/')
+DB_PATH = 'fisac.db'
 
-# --- Logging ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+def hash_password(password):
+    # Match the djb2 hash in database.c exactly.
+    # On Windows 64-bit (LLP64), C's `unsigned long` is typically 32 bits.
+    # We must truncate to 32 bits to match the C server's behavior.
+    hash_val = 5381
+    for c in password:
+        hash_val = ((hash_val << 5) + hash_val) + ord(c)
+        hash_val &= 0xFFFFFFFF  # 32-bit truncation per Windows unsigned long
+    return f"{hash_val:016x}"
 
-# --- Database Connection Pool ---
-try:
-    db_pool = psycopg2.pool.SimpleConnectionPool(1, 10,
-                                                 dbname=DB_NAME,
-                                                 user=DB_USER,
-                                                 password=DB_PASSWORD,
-                                                 host=DB_HOST,
-                                                 port=DB_PORT)
-    logging.info("Database connection pool created successfully.")
-except psycopg2.OperationalError as e:
-    logging.error(f"Could not connect to database: {e}")
-    db_pool = None
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    # Enable WAL mode for better concurrency
+    conn.execute('PRAGMA journal_mode=WAL')
+    return conn
 
-# --- Flask App ---
-app = Flask(__name__)
+def init_db():
+    # Do NOT drop tables — that would wipe all registered users on every restart.
+    # Just ensure the schema exists and demo users are seeded.
+    schema = """
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS locations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            latitude REAL NOT NULL,
+            longitude REAL NOT NULL,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            level TEXT NOT NULL,
+            message TEXT NOT NULL,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+    """
+    with get_db() as conn:
+        conn.executescript(schema)
+        # Seed demo users — INSERT OR IGNORE means existing accounts are preserved
+        try:
+            conn.execute("INSERT OR IGNORE INTO users (username, password_hash) VALUES (?, ?)", ("user1", hash_password("pass1")))
+            conn.execute("INSERT OR IGNORE INTO users (username, password_hash) VALUES (?, ?)", ("user2", hash_password("pass2")))
+        except sqlite3.Error:
+            pass
+        conn.commit()
 
-def get_db_conn():
-    if db_pool:
-        return db_pool.getconn()
-    return None
+@app.route('/')
+def serve_index():
+    return app.send_static_file('index.html')
 
-def put_db_conn(conn):
-    if db_pool:
-        db_pool.putconn(conn)
+@app.after_request
+def force_close_connection(response):
+    response.headers['Connection'] = 'close'
+    return response
+
+@app.route('/auth', methods=['POST'])
+def auth():
+    data = request.json
+    username = data.get('username')
+    password = data.get('password')
+    
+    if not username or not password:
+        return jsonify({"success": False, "message": "Missing credentials"})
+        
+    pwd_hash = hash_password(password)
+    
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM users WHERE username = ? AND password_hash = ?", (username, pwd_hash))
+        row = cur.fetchone()
+        
+        if row:
+            return jsonify({"success": True, "user_id": row['id']})
+        return jsonify({"success": False, "message": "Invalid credentials"})
+
+@app.route('/register', methods=['POST'])
+def register():
+    data = request.json
+    username = data.get('username')
+    password = data.get('password')
+    
+    if not username or not password:
+        return jsonify({"success": False, "message": "Missing credentials"})
+        
+    pwd_hash = hash_password(password)
+    
+    with get_db() as conn:
+        try:
+            cur = conn.cursor()
+            cur.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", (username, pwd_hash))
+            conn.commit()
+            return jsonify({"success": True, "user_id": cur.lastrowid})
+        except sqlite3.IntegrityError:
+            return jsonify({"success": False, "message": "Username already taken"})
+        except Exception as e:
+            return jsonify({"success": False, "message": str(e)})
 
 @app.route('/location', methods=['POST'])
-def add_location():
-    data = request.get_json()
-    if not data:
-        return jsonify({"error": "Invalid JSON"}), 400
-
+def location():
+    data = request.json
     user_id = data.get('user_id')
-    latitude = data.get('latitude')
-    longitude = data.get('longitude')
-
-    if not all([user_id, latitude, longitude]):
-        return jsonify({"error": "Missing data"}), 400
-
-    conn = get_db_conn()
-    if not conn:
-        return jsonify({"error": "Database connection failed"}), 500
+    lat = data.get('latitude')
+    lon = data.get('longitude')
+    
+    if not user_id or lat is None or lon is None:
+        return jsonify({"success": False})
         
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO locations (user_id, latitude, longitude) VALUES (%s, %s, %s)",
-                (user_id, latitude, longitude)
-            )
+    with get_db() as conn:
+        try:
+            conn.execute("INSERT INTO locations (user_id, latitude, longitude) VALUES (?, ?, ?)", (user_id, lat, lon))
             conn.commit()
-            logging.info(f"Inserted location for user {user_id}")
-        return jsonify({"message": "Location added"}), 201
-    except Exception as e:
-        logging.error(f"Database error: {e}")
-        conn.rollback()
-        return jsonify({"error": "Failed to add location"}), 500
-    finally:
-        put_db_conn(conn)
+            return jsonify({"success": True})
+        except:
+            return jsonify({"success": False})
 
 @app.route('/log', methods=['POST'])
-def add_log():
-    data = request.get_json()
-    if not data:
-        return jsonify({"error": "Invalid JSON"}), 400
-
-    level = data.get('level')
-    message = data.get('message')
-
-    if not all([level, message]):
-        return jsonify({"error": "Missing data"}), 400
-
-    conn = get_db_conn()
-    if not conn:
-        return jsonify({"error": "Database connection failed"}), 500
-
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO logs (level, message) VALUES (%s, %s)",
-                (level, message)
-            )
-            conn.commit()
-            logging.info(f"Log entry added: {level} - {message}")
-        return jsonify({"message": "Log added"}), 201
-    except Exception as e:
-        logging.error(f"Database error: {e}")
-        conn.rollback()
-        return jsonify({"error": "Failed to add log"}), 500
-    finally:
-        put_db_conn(conn)
+def log_event():
+    data = request.json
+    level = data.get('level', 'INFO')
+    message = data.get('message', '')
+    
+    if message:
+        with get_db() as conn:
+            try:
+                conn.execute("INSERT INTO logs (level, message) VALUES (?, ?)", (level, message))
+                conn.commit()
+            except:
+                pass
+    return jsonify({"success": True})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    print("Initializing Database...")
+    init_db()
+    print("Starting Flask DB Backend on port 5000...")
+    # Enable logging for debugging
+    app.run(host='127.0.0.1', port=5000)

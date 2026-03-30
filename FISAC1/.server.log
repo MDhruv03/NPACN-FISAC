@@ -1,0 +1,26 @@
+=============================================
+  Real-Time Location Sharing Server (FISAC)  
+  WinSock2 Server + Python Flask Backend     
+=============================================
+
+[INIT] WinSock2 initialized (version 2.2)
+[MAIN] Waiting 2 seconds for Python DB Service to start...
+[SOCKOPT] SO_REUSEADDR = 1  (address reuse enabled)
+[SOCKOPT] TCP_NODELAY = 1  (Nagle's algorithm disabled)
+[SOCKOPT] SO_KEEPALIVE = 1 (keep-alive probes enabled)
+[SOCKOPT] SO_RCVBUF = 131072 bytes (receive buffer)
+
+========================================
+   Location Server listening on :8080   
+========================================
+  Open frontend/index.html in browser   
+  Test users: user1/pass1, user2/pass2  
+========================================
+
+[CONN] New connection from 127.0.0.1:57395 (fd=248)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[AUTH] Sending POST /auth to Python service...
+[AUTH] Received response from Python service.
+[AUTH] User authenticated: user1 (id=1)
+[DISC] User 'user1' disconnected (slot 0)

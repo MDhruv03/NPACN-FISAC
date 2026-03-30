@@ -1,271 +1,34 @@
-Question - 
-Group-12	Design and implement a secure real-time Location Sharing Web Application where authenticated users can broadcast their live geographic coordinates to a central server, and the server distributes updates instantly to authorized connected clients using WebSockets over TCP. The system must demonstrate correct TCP socket programming, concurrent client handling, persistent database storage of location updates and session logs, secure communication practices, advanced socket option configuration, and reliable connection management.
-•	Analyze the complete TCP and WebSocket communication workflow of the system, including TLS-secured connection establishment, WebSocket handshake, full-duplex communication, and graceful termination, and justify the concurrency model used in the server to maintain data integrity and scalability.
-•	Implement a concurrent server that authenticates users, receives continuous location updates, stores them in a database with proper timestamping, logs connection events (syslogs), and efficiently broadcasts updates to authorized subscribers while correctly handling partial transmissions and network latency.
-•	Configure and experimentally evaluate socket options such as SO_REUSEADDR, SO_KEEPALIVE, SO_RCVBUF, and TCP_NODELAY, and analyze their impact on latency, throughput, secure session persistence, and database write performance under continuous update conditions.
-•	Evaluate system robustness under abnormal conditions such as sudden client disconnection, high update frequency, network congestion, and unauthorized access attempts, and analyze relevant TCP states including TIME_WAIT and CLOSE_WAIT, along with logging accuracy and database consistency.
+Question -
+Group-12: Design and implement a secure real-time Location Sharing Web Application where authenticated users broadcast live coordinates to a central server, and the server instantly distributes updates to authorized connected clients using WebSockets over TCP.
 
----
+Required outcomes:
+1. Analyze complete TCP + WebSocket workflow: secure setup, handshake, full-duplex exchange, graceful termination, and concurrency model justification.
+2. Implement concurrent authenticated server with continuous location ingestion, persistent timestamped storage, syslog events, and efficient broadcast while handling partial transmissions and latency.
+3. Configure and evaluate SO_REUSEADDR, SO_KEEPALIVE, SO_RCVBUF, TCP_NODELAY; analyze latency, throughput, session behavior, and write performance.
+4. Evaluate robustness under disconnects, high-frequency updates, congestion, and unauthorized attempts; analyze TIME_WAIT/CLOSE_WAIT behavior, log correctness, and DB consistency.
 
-# SYSTEM OVERVIEW
-
-[Frontend]
-↓ WebSocket
-[C Server: TCP + select()]
-↓ IPC / HTTP
+Current system architecture (implemented):
+[Frontend Browser]
+    <-> WebSocket (TCP 8080)
+[C Server: select()-based concurrent loop]
+    <-> HTTP loopback (127.0.0.1:5000)
 [Python Service Layer]
-↓
-[PostgreSQL]
-
----
-
-# HOW TO USE GEMINI CLI (CORE WORKFLOW)
-
-## RULES
-
-1. Always give precise prompts
-2. Never accept output blindly
-3. Test every generated code path
-4. Ask AI to critique itself
-
----
-
-# STAGE 1 — SERVER SCAFFOLDING
-
-## PROMPT: BASE TCP SERVER
-
-Generate a select()-based TCP server in C with the following:
-
-* Handles multiple clients
-* Uses non-blocking sockets
-* Correctly handles partial recv()
-* Detects client disconnect
-* Broadcasts messages to all clients
-* Uses SO_REUSEADDR and TCP_NODELAY
-
-Return clean modular code split into:
-
-* main.c
-* server.c
-* socket.c
-
----
-
-## PROMPT: HARDEN NETWORK LAYER
-
-Given this C server code:
-[PASTE YOUR CODE]
-
-Modify it to:
-
-* handle partial send() and recv()
-* prevent buffer overflow
-* handle ECONNRESET and EPIPE
-* avoid memory leaks
-* ensure proper socket cleanup
-
----
-
-# STAGE 2 — WEBSOCKET LAYER
-
-## PROMPT: HANDSHAKE
-
-Implement a minimal WebSocket handshake in C:
-
-* Parse HTTP Upgrade request
-* Extract Sec-WebSocket-Key
-* Generate Sec-WebSocket-Accept using SHA1 + Base64
-* Send correct HTTP 101 response
-
-Constraints:
-
-* No external heavy frameworks
-* Keep implementation minimal but correct
-
----
-
-## PROMPT: FRAME PARSING
-
-Implement WebSocket frame parsing:
-
-* Handle text frames only
-* Decode masked payload
-* Support payload length < 126 and extended lengths
-* Return clean decoded message
-
----
-
-# STAGE 3 — PROTOCOL DESIGN
-
-## PROMPT: MESSAGE PROTOCOL
-
-Design a lightweight text-based protocol for:
-
-* authentication
-* location updates
-* subscriptions
-
-Constraints:
-
-* human-readable
-* easy to parse in C
-* supports timestamping
-
----
-
-# STAGE 4 — DATABASE + SERVICE
-
-## PROMPT: PYTHON SERVICE
-
-Build a Python service that:
-
-* receives location updates from C server
-* stores them in PostgreSQL
-* logs:
-
-  * connections
-  * disconnections
-  * errors
-
-Use:
-
-* psycopg2
-* connection pooling
-* timestamped inserts
-
----
-
-## PROMPT: DB SCHEMA
-
-Design PostgreSQL schema for:
-
-* users
-* locations
-* sessions
-* logs
-
-Include:
-
-* primary keys
-* indexes for fast queries
-* timestamp fields
-
----
-
-# STAGE 5 — LOAD TESTING (CRITICAL)
-
-## PROMPT: LOAD TEST
-
-Write a Python script that:
-
-* simulates 200 WebSocket clients
-* sends location updates every 100ms
-* randomly disconnects 10% of clients
-* measures:
-
-  * latency
-  * failed sends
-  * reconnect attempts
-
----
-
-## PROMPT: CHAOS TEST
-
-Generate a test script that:
-
-* introduces artificial delay
-* simulates packet drops
-* floods server with bursts
-
----
-
-# STAGE 6 — SOCKET OPTIONS EXPERIMENT
-
-## PROMPT: SOCKET OPTIONS
-
-Explain and implement in C:
-
-* SO_REUSEADDR
-* SO_KEEPALIVE
-* SO_RCVBUF
-* TCP_NODELAY
-
-Then design an experiment to measure:
-
-* latency difference
-* throughput
-* connection stability
-
----
-
-# STAGE 7 — LOG ANALYSIS
-
-## PROMPT: LOG ANALYZER
-
-Analyze the following logs:
-[PASTE LOGS]
-
-Detect:
-
-* abnormal disconnect patterns
-* TIME_WAIT buildup
-* failed DB writes
-* latency spikes
-
-Provide:
-
-* root cause
-* fixes
-
----
-
-# STAGE 8 — FAILURE HANDLING
-
-## PROMPT: EDGE CASES
-
-Given this system:
-[DESCRIBE YOUR SYSTEM]
-
-List all failure scenarios:
-
-* client crash
-* network congestion
-* partial transmission
-* unauthorized access
-
-Provide:
-
-* mitigation strategies
-* code-level fixes
-
----
-
-# STAGE 9 — VIVA PREP (VERY IMPORTANT)
-
-## PROMPT: GRILL ME
-
-Ask me difficult viva questions on:
-
-* TCP states (TIME_WAIT, CLOSE_WAIT)
-* select() vs threads
-* WebSocket vs raw TCP
-* socket options impact
-* handling partial recv()
-
-Then evaluate my answers critically.
-
----
-
-# VALIDATION CHECKLIST (YOU MUST PASS THIS)
-
-* [ ] Handles 100+ concurrent clients
-* [ ] No crash on disconnect
-* [ ] No data loss on partial recv
-* [ ] Logs all connections
-* [ ] DB writes are consistent
-* [ ] Broadcast works correctly
-* [ ] Socket options tested and compared
-
----
+    <-> SQLite persistent storage
+
+Project status notes:
+- Authentication, location ingest, broadcast path, and persistence are implemented.
+- Socket options are implemented in server socket setup.
+- Load/chaos/log-analysis scripts are present under scripts/.
+- Remaining report work should focus on measurement tables, robustness evidence, and concise workflow analysis.
+
+Handwritten split among 3 members:
+- Member 1 -> Question 1 (TCP + WebSocket workflow + concurrency model justification)
+- Member 2 -> Question 2 (Concurrent authenticated server + persistence + syslogs + broadcast)
+- Member 3 -> Questions 3 and 4 (Socket option evaluation + robustness/TCP state analysis)
+
+Evidence scripts for screenshots:
+- Q1: python scripts/q1_workflow_capture.py
+- Q2: run_all.bat --no-pause tuned (show login + location update + DB/log entries)
+- Q3/Q4: python scripts/profile_eval.py (generates docs/evidence/*.json)
 
 

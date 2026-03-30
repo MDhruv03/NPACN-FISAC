@@ -18,16 +18,30 @@
 #include <string.h>
 #include <stdlib.h>
 
-/*
- * send_json_response: Helper to send a JSON object as a WebSocket text frame.
- */
-static void send_json_response(SOCKET sock, cJSON *json) {
-    char *str = cJSON_PrintUnformatted(json);
-    if (str) {
-        if (websocket_frame_send(sock, str, (uint64_t)strlen(str), 1) == -1) {
-            fprintf(stderr, "[PROTO] Failed to send JSON response to socket %lld\n", (long long)sock);
+/* Escape quotes and backslashes for safe JSON string insertion. */
+static void json_escape_minimal(const char *in, char *out, size_t out_size) {
+    size_t j = 0;
+    if (out_size == 0) return;
+
+    for (size_t i = 0; in && in[i] != '\0' && j + 1 < out_size; i++) {
+        char c = in[i];
+        if ((c == '"' || c == '\\') && j + 2 < out_size) {
+            out[j++] = '\\';
+            out[j++] = c;
+        } else if ((unsigned char)c >= 0x20) {
+            out[j++] = c;
         }
-        free(str);
+    }
+    out[j] = '\0';
+}
+
+/*
+ * send_json_response: Send a pre-formatted JSON string as a WebSocket text frame.
+ */
+static void send_json_response(SOCKET sock, const char *json_str) {
+    if (!json_str) return;
+    if (websocket_frame_send(sock, json_str, (uint64_t)strlen(json_str), 1) == -1) {
+        fprintf(stderr, "[PROTO] Failed to send JSON response to socket %lld\n", (long long)sock);
     }
 }
 
@@ -39,17 +53,12 @@ static void send_json_response(SOCKET sock, cJSON *json) {
 static void handle_auth(ClientInfo *client, cJSON *payload) {
     cJSON *username = cJSON_GetObjectItem(payload, "username");
     cJSON *password = cJSON_GetObjectItem(payload, "password");
-
-    cJSON *response = cJSON_CreateObject();
-    cJSON_AddStringToObject(response, "type", MSG_TYPE_AUTH_RESPONSE);
-    cJSON *resp_payload = cJSON_CreateObject();
-    cJSON_AddItemToObject(response, "payload", resp_payload);
+    char response[768];
 
     if (!username || username->type != cJSON_String || !password || password->type != cJSON_String) {
-        cJSON_AddBoolToObject(resp_payload, "success", 0);
-        cJSON_AddStringToObject(resp_payload, "message", "Missing username or password");
+        snprintf(response, sizeof(response),
+                 "{\"type\":\"auth_response\",\"payload\":{\"success\":false,\"message\":\"Missing username or password\"}}");
         send_json_response(client->sock, response);
-        cJSON_Delete(response);
         return;
     }
 
@@ -78,23 +87,25 @@ static void handle_auth(ClientInfo *client, cJSON *payload) {
     }
 
     if (success) {
+        char esc_username[128];
+        json_escape_minimal(username->valuestring, esc_username, sizeof(esc_username));
+
         client->authenticated = 1;
         client->user_id = user_id;
         strncpy(client->username, username->valuestring, MAX_USERNAME - 1);
         client->username[MAX_USERNAME - 1] = '\0';
 
-        cJSON_AddBoolToObject(resp_payload, "success", 1);
-        cJSON_AddStringToObject(resp_payload, "message", "Authentication successful");
-        cJSON_AddNumberToObject(resp_payload, "user_id", user_id);
-        cJSON_AddStringToObject(resp_payload, "username", client->username);
+        snprintf(response, sizeof(response),
+                 "{\"type\":\"auth_response\",\"payload\":{\"success\":true,\"message\":\"Authentication successful\",\"user_id\":%d,\"username\":\"%s\"}}",
+                 user_id, esc_username);
 
         char log_msg[256];
         snprintf(log_msg, sizeof(log_msg), "User authenticated: %s (id=%d)", client->username, user_id);
         log_event("INFO", log_msg);
         printf("[AUTH] %s\n", log_msg);
     } else {
-        cJSON_AddBoolToObject(resp_payload, "success", 0);
-        cJSON_AddStringToObject(resp_payload, "message", "Invalid credentials or service unavailable");
+        snprintf(response, sizeof(response),
+                 "{\"type\":\"auth_response\",\"payload\":{\"success\":false,\"message\":\"Invalid credentials or service unavailable\"}}");
 
         char log_msg[256];
         snprintf(log_msg, sizeof(log_msg), "Failed auth attempt: %s", username->valuestring);
@@ -103,7 +114,6 @@ static void handle_auth(ClientInfo *client, cJSON *payload) {
     }
 
     send_json_response(client->sock, response);
-    cJSON_Delete(response);
 }
 
 /*
@@ -112,25 +122,19 @@ static void handle_auth(ClientInfo *client, cJSON *payload) {
 static void handle_register(ClientInfo *client, cJSON *payload) {
     cJSON *username = cJSON_GetObjectItem(payload, "username");
     cJSON *password = cJSON_GetObjectItem(payload, "password");
-
-    cJSON *response = cJSON_CreateObject();
-    cJSON_AddStringToObject(response, "type", MSG_TYPE_AUTH_RESPONSE);
-    cJSON *resp_payload = cJSON_CreateObject();
-    cJSON_AddItemToObject(response, "payload", resp_payload);
+    char response[1024];
 
     if (!username || username->type != cJSON_String || !password || password->type != cJSON_String) {
-        cJSON_AddBoolToObject(resp_payload, "success", 0);
-        cJSON_AddStringToObject(resp_payload, "message", "Missing username or password");
+        snprintf(response, sizeof(response),
+                 "{\"type\":\"auth_response\",\"payload\":{\"success\":false,\"message\":\"Missing username or password\"}}");
         send_json_response(client->sock, response);
-        cJSON_Delete(response);
         return;
     }
 
     if (strlen(username->valuestring) < 2 || strlen(username->valuestring) > 50 || strlen(password->valuestring) < 3) {
-        cJSON_AddBoolToObject(resp_payload, "success", 0);
-        cJSON_AddStringToObject(resp_payload, "message", "Invalid username or password length");
+        snprintf(response, sizeof(response),
+                 "{\"type\":\"auth_response\",\"payload\":{\"success\":false,\"message\":\"Invalid username or password length\"}}");
         send_json_response(client->sock, response);
-        cJSON_Delete(response);
         return;
     }
 
@@ -167,29 +171,33 @@ static void handle_register(ClientInfo *client, cJSON *payload) {
     }
 
     if (success) {
+        char esc_username[128];
+        json_escape_minimal(username->valuestring, esc_username, sizeof(esc_username));
+
         /* Auto-login after registration */
         client->authenticated = 1;
         client->user_id = user_id;
         strncpy(client->username, username->valuestring, MAX_USERNAME - 1);
         client->username[MAX_USERNAME - 1] = '\0';
 
-        cJSON_AddBoolToObject(resp_payload, "success", 1);
-        cJSON_AddStringToObject(resp_payload, "message", "Registration successful");
-        cJSON_AddNumberToObject(resp_payload, "user_id", user_id);
-        cJSON_AddStringToObject(resp_payload, "username", client->username);
+        snprintf(response, sizeof(response),
+                 "{\"type\":\"auth_response\",\"payload\":{\"success\":true,\"message\":\"Registration successful\",\"user_id\":%d,\"username\":\"%s\"}}",
+                 user_id, esc_username);
 
         char log_msg[256];
         snprintf(log_msg, sizeof(log_msg), "New user registered: %s (id=%d)", client->username, user_id);
         log_event("INFO", log_msg);
         printf("[REG] %s\n", log_msg);
     } else {
-        cJSON_AddBoolToObject(resp_payload, "success", 0);
-        cJSON_AddStringToObject(resp_payload, "message", error_msg);
+        char esc_msg[384];
+        json_escape_minimal(error_msg, esc_msg, sizeof(esc_msg));
+        snprintf(response, sizeof(response),
+                 "{\"type\":\"auth_response\",\"payload\":{\"success\":false,\"message\":\"%s\"}}",
+                 esc_msg);
         printf("[REG] Registration failed for '%s'\n", username->valuestring);
     }
 
     send_json_response(client->sock, response);
-    cJSON_Delete(response);
 }
 
 /*
@@ -240,13 +248,8 @@ void handle_message(ClientInfo *client_info, const char *message) {
         handle_register(client_info, payload);
     } else if (!client_info->authenticated) {
         /* Reject all other messages from unauthenticated clients */
-        cJSON *error = cJSON_CreateObject();
-        cJSON_AddStringToObject(error, "type", MSG_TYPE_ERROR);
-        cJSON *err_payload = cJSON_CreateObject();
-        cJSON_AddItemToObject(error, "payload", err_payload);
-        cJSON_AddStringToObject(err_payload, "message", "Authentication required");
-        send_json_response(client_info->sock, error);
-        cJSON_Delete(error);
+        send_json_response(client_info->sock,
+                           "{\"type\":\"error\",\"payload\":{\"message\":\"Authentication required\"}}");
 
         char log_msg[256];
         snprintf(log_msg, sizeof(log_msg), "Unauthorized message attempt (type: %s)", type->valuestring);

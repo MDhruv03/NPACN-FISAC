@@ -36,6 +36,7 @@ let txCount = 0, rxCount = 0;
 let connectTime = null;
 let uptimeInterval = null;
 let latencyStart = 0;
+let authTimeoutId = null;
 
 /* Color palette for user markers */
 const USER_COLORS = [
@@ -133,6 +134,11 @@ function connectAndAuth(username, password) {
         ws = null;
     }
 
+    if (authTimeoutId) {
+        clearTimeout(authTimeoutId);
+        authTimeoutId = null;
+    }
+
     updateConnectionState(STATE.CONNECTING);
     ws = new WebSocket('ws://localhost:8080');
 
@@ -146,6 +152,19 @@ function connectAndAuth(username, password) {
         ws.send(JSON.stringify(msg));
         txCount++;
         log(`Sent ${msg.type.toUpperCase()} request to server.`, 'tx');
+
+        /* Guard against hanging forever if auth_response never arrives. */
+        authTimeoutId = setTimeout(() => {
+            if (state !== STATE.CONNECTED) {
+                UI.authError.textContent = 'Authentication timed out. Please retry.';
+                log('Auth timeout: no auth_response from server.', 'err');
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.close();
+                }
+                resetAuthButton();
+                updateConnectionState(STATE.DISCONNECTED);
+            }
+        }, 10000);
     };
 
     ws.onmessage = (e) => {
@@ -153,6 +172,10 @@ function connectAndAuth(username, password) {
         UI.statRx.textContent = rxCount;
         try {
             const data = JSON.parse(e.data);
+            if (data && data.type === 'auth_response' && authTimeoutId) {
+                clearTimeout(authTimeoutId);
+                authTimeoutId = null;
+            }
             handleServerMessage(data);
         } catch (err) {
             log(`Parse error: ${err.message}`, 'err');
@@ -163,10 +186,18 @@ function connectAndAuth(username, password) {
         console.error('WS Error:', err);
         log('WebSocket error: Could not reach server.', 'err');
         UI.authError.textContent = 'Connection failed. Is the server running?';
+        if (authTimeoutId) {
+            clearTimeout(authTimeoutId);
+            authTimeoutId = null;
+        }
         resetAuthButton();
     };
 
     ws.onclose = (code) => {
+        if (authTimeoutId) {
+            clearTimeout(authTimeoutId);
+            authTimeoutId = null;
+        }
         updateConnectionState(STATE.DISCONNECTED);
         log(`Connection closed (code: ${code.code}).`, 'system');
         stopSharing();

@@ -1,0 +1,21 @@
+{
+  "clients": 20,
+  "duration_s": 20.0797700881958,
+  "connected": 18,
+  "disconnected": 8,
+  "auth_success": 16,
+  "auth_fail": 0,
+  "messages_sent": 278,
+  "messages_received": 646,
+  "errors": 2,
+  "throughput_msg_s": 13.844780033782685,
+  "latency_ms": {
+    "min": 0.0,
+    "max": 2.057790756225586,
+    "mean": 0.24411219816941482,
+    "p50": 0.0,
+    "p95": 1.0662078857421875,
+    "p99": 1.3897418975830078,
+    "samples": 260
+  }
+}

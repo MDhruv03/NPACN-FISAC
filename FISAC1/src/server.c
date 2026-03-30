@@ -204,6 +204,9 @@ void server_run(Server *server) {
                         }
                         cJSON_Delete(json);
                     }
+                } else if (len == 0) {
+                    /* Control frame handled internally (ping/pong/unsupported). */
+                    continue;
                 } else {
                     /*
                      * Client disconnected (recv returned 0 or error).

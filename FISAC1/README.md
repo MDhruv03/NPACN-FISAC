@@ -19,11 +19,24 @@ A secure real-time location sharing web application built with C (WinSock2), Web
 ### Prerequisites
 - **GCC** (MinGW recommended) with `mingw32-make`
 - **Windows 10/11**
+- **Python 3.9+** with `Flask` (backend API)
+
+Install Python dependencies:
+
+```bash
+python -m pip install -r scripts/requirements.txt
+```
 
 ### Build & Run
 
 ```batch
 run_all.bat
+```
+
+Non-interactive mode (for CI or scripted runs):
+
+```batch
+run_all.bat --no-pause
 ```
 
 Or manually:

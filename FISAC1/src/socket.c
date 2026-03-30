@@ -11,6 +11,7 @@
 #include "socket.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <ws2tcpip.h>
 
 #pragma comment(lib, "ws2_32.lib")
@@ -50,6 +51,14 @@ SOCKET create_socket(void) {
 void set_socket_options(SOCKET sock) {
     int opt_val;
     int opt_len;
+    const char *profile = getenv("FISAC_SOCKOPTS_PROFILE");
+    int tuned = 1;
+
+    if (profile && _stricmp(profile, "baseline") == 0) {
+        tuned = 0;
+    }
+
+    printf("[SOCKOPT] Profile: %s\n", tuned ? "tuned" : "baseline");
 
     /*
      * SO_REUSEADDR: Allows the server socket to bind to an address that is in
@@ -61,12 +70,12 @@ void set_socket_options(SOCKET sock) {
      * - Enables instant server restart during development and after crashes
      * - Prevents bind() failures when rapidly cycling the server
      */
-    opt_val = 1;
+    opt_val = tuned ? 1 : 0;
     if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt_val, sizeof(opt_val)) == SOCKET_ERROR) {
         fprintf(stderr, "[ERROR] setsockopt(SO_REUSEADDR) failed: %d\n", WSAGetLastError());
         exit(EXIT_FAILURE);
     }
-    printf("[SOCKOPT] SO_REUSEADDR = 1  (address reuse enabled)\n");
+    printf("[SOCKOPT] SO_REUSEADDR = %d\n", opt_val);
 
     /*
      * TCP_NODELAY: Disables Nagle's algorithm. Nagle's algorithm batches small
@@ -79,12 +88,12 @@ void set_socket_options(SOCKET sock) {
      * - With TCP_NODELAY, each location update is sent immediately
      * - Critical for real-time location broadcasting where latency matters
      */
-    opt_val = 1;
+    opt_val = tuned ? 1 : 0;
     if (setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (const char *)&opt_val, sizeof(opt_val)) == SOCKET_ERROR) {
         fprintf(stderr, "[ERROR] setsockopt(TCP_NODELAY) failed: %d\n", WSAGetLastError());
         exit(EXIT_FAILURE);
     }
-    printf("[SOCKOPT] TCP_NODELAY = 1  (Nagle's algorithm disabled)\n");
+    printf("[SOCKOPT] TCP_NODELAY = %d\n", opt_val);
 
     /*
      * SO_KEEPALIVE: Enables TCP keep-alive probes. When a connection is idle
@@ -98,12 +107,12 @@ void set_socket_options(SOCKET sock) {
      * - With SO_KEEPALIVE, the OS detects dead connections and notifies select()
      * - Prevents CLOSE_WAIT socket leaks and file descriptor exhaustion
      */
-    opt_val = 1;
+    opt_val = tuned ? 1 : 0;
     if (setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE, (const char *)&opt_val, sizeof(opt_val)) == SOCKET_ERROR) {
         fprintf(stderr, "[ERROR] setsockopt(SO_KEEPALIVE) failed: %d\n", WSAGetLastError());
         exit(EXIT_FAILURE);
     }
-    printf("[SOCKOPT] SO_KEEPALIVE = 1 (keep-alive probes enabled)\n");
+    printf("[SOCKOPT] SO_KEEPALIVE = %d\n", opt_val);
 
     /*
      * SO_RCVBUF: Sets the size of the kernel receive buffer for this socket.
@@ -116,7 +125,7 @@ void set_socket_options(SOCKET sock) {
      * - Improves throughput at the cost of slightly more memory per socket
      * - Reduces retransmissions under high update frequency
      */
-    opt_val = 131072; /* 128KB */
+    opt_val = tuned ? 131072 : 8192; /* tuned=128KB, baseline=8KB */
     if (setsockopt(sock, SOL_SOCKET, SO_RCVBUF, (const char *)&opt_val, sizeof(opt_val)) == SOCKET_ERROR) {
         fprintf(stderr, "[ERROR] setsockopt(SO_RCVBUF) failed: %d\n", WSAGetLastError());
         exit(EXIT_FAILURE);

@@ -1,0 +1,18 @@
+Q1 Workflow Capture
+Generated: 2026-03-30 17:26:33
+
+1) TCP connect: SUCCESS
+2) WebSocket handshake response:
+HTTP/1.1 101 Switching Protocols
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Accept: 1AmrBw46f8TOV6Sd/pHEp3SDxCI=
+3) Auth request sent over WS text frame
+4) Auth response payload:
+{"type":"auth_response","payload":{"success":true,"message":"Authentication successful","user_id":1,"username":"user1"}}
+5) Client close frame sent and socket closed
+
+6) TCP state snapshot (:8080):
+TCP    0.0.0.0:8080           0.0.0.0:0              LISTENING       14080
+  TCP    127.0.0.1:8080         127.0.0.1:53340        ESTABLISHED     14080
+  TCP    127.0.0.1:53340        127.0.0.1:8080         ESTABLISHED     28584

@@ -1,0 +1,52 @@
+Q2 DB Snapshot
+Generated: 2026-03-30 18:11:49
+
+Table users: count = 32
+Table locations: count = 1978
+Table logs: count = 1764
+
+Recent users (max 10):
+id=70 username=loadtest_29 created_at=2026-03-30 11:58:29
+id=69 username=loadtest_28 created_at=2026-03-30 11:58:27
+id=68 username=loadtest_27 created_at=2026-03-30 11:58:25
+id=67 username=loadtest_26 created_at=2026-03-30 11:58:22
+id=66 username=loadtest_25 created_at=2026-03-30 11:58:20
+id=65 username=loadtest_24 created_at=2026-03-30 11:58:18
+id=64 username=loadtest_23 created_at=2026-03-30 11:58:15
+id=63 username=loadtest_22 created_at=2026-03-30 11:58:13
+id=62 username=loadtest_21 created_at=2026-03-30 11:58:11
+id=61 username=loadtest_20 created_at=2026-03-30 11:58:09
+
+Recent locations (max 10):
+user_id=1 lat=0.000000 lon=0.000000 ts=2026-03-30 12:40:32
+user_id=1 lat=82.529624 lon=-17.803670 ts=2026-03-30 12:38:48
+user_id=1 lat=-54.786507 lon=-138.106681 ts=2026-03-30 12:38:48
+user_id=1 lat=-7.730261 lon=75.696103 ts=2026-03-30 12:38:47
+user_id=1 lat=48.456075 lon=144.720393 ts=2026-03-30 12:38:47
+user_id=1 lat=39.282052 lon=140.081527 ts=2026-03-30 12:38:47
+user_id=1 lat=9.990054 lon=92.373106 ts=2026-03-30 12:38:47
+user_id=1 lat=2.521811 lon=-69.203550 ts=2026-03-30 12:38:47
+user_id=1 lat=-27.268227 lon=82.116330 ts=2026-03-30 12:38:47
+user_id=1 lat=-75.986245 lon=-23.815624 ts=2026-03-30 12:38:47
+
+Recent logs (max 20):
+[INFO] 2026-03-30 12:40:32 User disconnected: user1
+[INFO] 2026-03-30 12:40:31 Unauthenticated client disconnected
+[INFO] 2026-03-30 12:40:31 WebSocket handshake successful
+[INFO] 2026-03-30 12:40:30 New connection from 127.0.0.1:60371
+[INFO] 2026-03-30 12:40:28 Unauthenticated client disconnected
+[INFO] 2026-03-30 12:40:28 WebSocket handshake successful
+[INFO] 2026-03-30 12:40:28 New connection from 127.0.0.1:60366
+[INFO] 2026-03-30 12:40:27 User authenticated: user1 (id=1)
+[INFO] 2026-03-30 12:40:27 WebSocket handshake successful
+[INFO] 2026-03-30 12:40:27 New connection from 127.0.0.1:60361
+[INFO] 2026-03-30 12:40:26 Unauthenticated client disconnected
+[INFO] 2026-03-30 12:40:26 WebSocket handshake successful
+[INFO] 2026-03-30 12:40:26 New connection from 127.0.0.1:60356
+[INFO] 2026-03-30 12:40:25 Unauthenticated client disconnected
+[INFO] 2026-03-30 12:40:25 WebSocket handshake successful
+[INFO] 2026-03-30 12:40:25 New connection from 127.0.0.1:60351
+[INFO] 2026-03-30 12:40:24 Unauthenticated client disconnected
+[INFO] 2026-03-30 12:40:24 WebSocket handshake successful
+[INFO] 2026-03-30 12:40:24 New connection from 127.0.0.1:60346
+[INFO] 2026-03-30 12:40:22 Unauthenticated client disconnected

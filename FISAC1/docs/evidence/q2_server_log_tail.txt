@@ -1,0 +1,150 @@
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:59943 (fd=460)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:59948 (fd=472)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:59953 (fd=468)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:59958 (fd=472)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:59963 (fd=412)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:59968 (fd=452)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:59973 (fd=444)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:59978 (fd=444)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:60083 (fd=436)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:60088 (fd=408)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:60093 (fd=432)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:60098 (fd=472)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slo[PROTO] JSON parse error near: not json at all
+t 0)
+[CONN] New connection from 127.0.0.1:60103 (fd=472)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:60108 (fd=428)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:60214 (fd=400)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:60219 (fd=428)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:60225 (fd=400)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:60230 (fd=400)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:60235 (fd=400)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:60240 (fd=468)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:60245 (fd=468)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:60250 (fd=468)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:60255 (fd=400)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:60260 (fd=400)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:60265 (fd=440)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:60270 (fd=440)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:60275 (fd=412)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:60280 (fd=476)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[CONN] New connection from 127.0.0.1:60283 (fd=488)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 1
+[DISC] Unauthenticated client disconnected (slot 1)
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:60290 (fd=460)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:60295 (fd=460)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:60301 (fd=476)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:60306 (fd=476)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[CONN] New connection from 127.0.0.1:60309 (fd=496)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 1
+[DISC] Unauthenticated client disconnected (slot 1)
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:60316 (fd=496)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:60321 (fd=508)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected (slot 0)
+[CONN] New connection from 127.0.0.1:60327 (fd=516)
+[CONN] WebSocket handshake OK
+[CONN] Client added to slot 0
+[DISC] Unauthenticated client disconnected 

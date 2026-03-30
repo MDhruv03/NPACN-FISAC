@@ -6,11 +6,13 @@ import json
 import time
 import random
 import sys
+import argparse
 
-NUM_CLIENTS = 50        # Number of concurrent clients
-UPDATE_INTERVAL = 0.2   # 200ms between location updates
-TEST_DURATION = 30      # Duration in seconds
-DISCONNECT_CHANCE = 0.05  # 5% chance of random disconnect per cycle
+NUM_CLIENTS = 50
+UPDATE_INTERVAL = 0.2
+TEST_DURATION = 30
+DISCONNECT_CHANCE = 0.05
+OUTPUT_JSON = None
 
 # Pre-created test users
 TEST_USERS = [f"loadtest_{i}" for i in range(NUM_CLIENTS)]
@@ -194,8 +196,51 @@ async def main():
     print(f"\n  Throughput: {throughput:.1f} msg/s")
     print(f"{'='*60}\n")
 
+    if OUTPUT_JSON:
+        samples = sorted(stats["latency_samples"]) if stats["latency_samples"] else []
+        payload = {
+            "clients": NUM_CLIENTS,
+            "duration_s": elapsed,
+            "connected": stats["connected"],
+            "disconnected": stats["disconnected"],
+            "auth_success": stats["auth_success"],
+            "auth_fail": stats["auth_fail"],
+            "messages_sent": stats["messages_sent"],
+            "messages_received": stats["messages_received"],
+            "errors": stats["errors"],
+            "throughput_msg_s": throughput,
+            "latency_ms": {
+                "min": (min(samples) if samples else None),
+                "max": (max(samples) if samples else None),
+                "mean": (sum(samples) / len(samples) if samples else None),
+                "p50": (samples[int(len(samples) * 0.5)] if samples else None),
+                "p95": (samples[int(len(samples) * 0.95)] if samples else None),
+                "p99": (samples[min(int(len(samples) * 0.99), len(samples)-1)] if samples else None),
+                "samples": len(samples),
+            },
+        }
+        with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+        print(f"[OK] Wrote JSON report: {OUTPUT_JSON}")
+
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="WebSocket load test")
+    parser.add_argument("--clients", type=int, default=NUM_CLIENTS)
+    parser.add_argument("--interval", type=float, default=UPDATE_INTERVAL)
+    parser.add_argument("--duration", type=int, default=TEST_DURATION)
+    parser.add_argument("--disconnect-chance", type=float, default=DISCONNECT_CHANCE)
+    parser.add_argument("--output-json", type=str, default=None)
+    args = parser.parse_args()
+
+    NUM_CLIENTS = args.clients
+    UPDATE_INTERVAL = args.interval
+    TEST_DURATION = args.duration
+    DISCONNECT_CHANCE = args.disconnect_chance
+    OUTPUT_JSON = args.output_json
+
+    TEST_USERS = [f"loadtest_{i}" for i in range(NUM_CLIENTS)]
+
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

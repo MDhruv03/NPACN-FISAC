@@ -6,8 +6,10 @@ import json
 import time
 import random
 import sys
+import argparse
 
 URI = "ws://localhost:8080"
+OUTPUT_JSON = None
 
 stats = {
     "flood_sent": 0,
@@ -177,8 +179,21 @@ async def main():
     print(f"  Errors encountered:         {stats['errors']}")
     print(f"{'='*60}\n")
 
+    if OUTPUT_JSON:
+        with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
+            json.dump(stats, f, indent=2)
+        print(f"[OK] Wrote JSON report: {OUTPUT_JSON}")
+
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Chaos robustness test")
+    parser.add_argument("--uri", type=str, default=URI)
+    parser.add_argument("--output-json", type=str, default=None)
+    args = parser.parse_args()
+
+    URI = args.uri
+    OUTPUT_JSON = args.output_json
+
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

@@ -22,6 +22,35 @@
 
 static const char *WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
+/* Read exactly len bytes; tolerate transient WSAEWOULDBLOCK from robust_recv. */
+static int recv_exact(SOCKET client_sock, char *buf, int len) {
+    int total = 0;
+    int idle_retries = 0;
+
+    while (total < len) {
+        int n = robust_recv(client_sock, buf + total, len - total);
+        if (n > 0) {
+            total += n;
+            idle_retries = 0;
+            continue;
+        }
+
+        if (n == -1) {
+            /* Would-block on non-blocking sockets. Retry briefly. */
+            if (++idle_retries > 2000) {
+                return -1;
+            }
+            Sleep(1);
+            continue;
+        }
+
+        /* n == 0 (disconnect) or n == -2 (fatal recv error) */
+        return -1;
+    }
+
+    return total;
+}
+
 /*
  * Manual 64-bit big-endian byte swap for Windows.
  * Windows does not provide be64toh() / htobe64() like Linux.
@@ -47,10 +76,34 @@ static uint64_t swap_uint64(uint64_t val) {
  */
 int websocket_handshake(SOCKET client_sock) {
     char buffer[4096];
-    int bytes_received = robust_recv(client_sock, buffer, sizeof(buffer) - 1);
-    if (bytes_received <= 0) {
+    int bytes_received = 0;
+
+    /* Read until end of HTTP headers (\r\n\r\n) to avoid partial-handshake failures. */
+    while (bytes_received < (int)sizeof(buffer) - 1) {
+        int n = robust_recv(client_sock, buffer + bytes_received, (int)sizeof(buffer) - 1 - bytes_received);
+        if (n > 0) {
+            bytes_received += n;
+            buffer[bytes_received] = '\0';
+            if (strstr(buffer, "\r\n\r\n") != NULL) {
+                break;
+            }
+            continue;
+        }
+
+        if (n == -1) {
+            /* Wait briefly for remaining header bytes on non-blocking sockets. */
+            Sleep(1);
+            continue;
+        }
+
         return -1;
     }
+
+    if (bytes_received <= 0 || strstr(buffer, "\r\n\r\n") == NULL) {
+        fprintf(stderr, "[WS] Handshake failed: incomplete HTTP upgrade request\n");
+        return -1;
+    }
+
     buffer[bytes_received] = '\0';
 
     /* Extract Sec-WebSocket-Key from HTTP headers */
@@ -112,7 +165,7 @@ int websocket_handshake(SOCKET client_sock) {
  */
 int websocket_frame_recv(SOCKET client_sock, char *buffer, int buffer_size) {
     uint8_t header[2];
-    if (robust_recv(client_sock, (char *)header, 2) <= 0) return -1;
+    if (recv_exact(client_sock, (char *)header, 2) <= 0) return -1;
 
     uint8_t opcode = header[0] & 0x0F;
     uint8_t mask = (header[1] >> 7) & 1;
@@ -123,20 +176,14 @@ int websocket_frame_recv(SOCKET client_sock, char *buffer, int buffer_size) {
         return -1;
     }
 
-    /* Only support text frames (opcode 1) */
-    if (opcode != 1) {
-        fprintf(stderr, "[WS] Unsupported opcode: %d\n", opcode);
-        return -1;
-    }
-
     /* Extended payload length handling */
     if (payload_len == 126) {
         uint16_t len;
-        if (robust_recv(client_sock, (char *)&len, 2) <= 0) return -1;
+        if (recv_exact(client_sock, (char *)&len, 2) <= 0) return -1;
         payload_len = ntohs(len);
     } else if (payload_len == 127) {
         uint64_t len;
-        if (robust_recv(client_sock, (char *)&len, 8) <= 0) return -1;
+        if (recv_exact(client_sock, (char *)&len, 8) <= 0) return -1;
         payload_len = swap_uint64(len);
     }
 
@@ -149,17 +196,12 @@ int websocket_frame_recv(SOCKET client_sock, char *buffer, int buffer_size) {
     /* Read masking key (client-to-server frames MUST be masked per RFC 6455) */
     uint8_t masking_key[4];
     if (mask) {
-        if (robust_recv(client_sock, (char *)masking_key, 4) <= 0) return -1;
+        if (recv_exact(client_sock, (char *)masking_key, 4) <= 0) return -1;
     }
 
     /* Read payload data */
     int to_read = (int)payload_len;
-    int total_read = 0;
-    while (total_read < to_read) {
-        int n = robust_recv(client_sock, buffer + total_read, to_read - total_read);
-        if (n <= 0) return -1;
-        total_read += n;
-    }
+    if (recv_exact(client_sock, buffer, to_read) <= 0) return -1;
 
     /* Unmask payload */
     if (mask) {
@@ -168,6 +210,20 @@ int websocket_frame_recv(SOCKET client_sock, char *buffer, int buffer_size) {
         }
     }
     buffer[to_read] = '\0';
+
+    /* Respond to ping and ignore non-text control/data frames gracefully. */
+    if (opcode == 9) { /* PING */
+        (void)websocket_frame_send(client_sock, buffer, payload_len, 10); /* PONG */
+        return 0;
+    }
+
+    if (opcode == 10) { /* PONG */
+        return 0;
+    }
+
+    if (opcode != 1) {
+        return 0;
+    }
 
     return to_read;
 }

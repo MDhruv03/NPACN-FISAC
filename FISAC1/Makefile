@@ -6,12 +6,22 @@ SRC_DIR = src
 INC_DIR = include
 OBJ_DIR = obj
 
-APP_SRCS = $(wildcard $(SRC_DIR)/*.c)
+APP_SRCS = \
+	$(SRC_DIR)/main.c \
+	$(SRC_DIR)/server.c \
+	$(SRC_DIR)/socket.c \
+	$(SRC_DIR)/network.c \
+	$(SRC_DIR)/websocket.c \
+	$(SRC_DIR)/protocol.c \
+	$(SRC_DIR)/http_client.c \
+	$(SRC_DIR)/sha1.c \
+	$(SRC_DIR)/base64.c \
+	$(SRC_DIR)/cJSON.c
 APP_OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(APP_SRCS))
 
-TARGET = server
+TARGET = server.exe
 
-all: clean $(TARGET)
+all: $(TARGET)
 
 $(TARGET): $(APP_OBJS)
 	$(CC) -o $@ $^ $(LDFLAGS)
@@ -23,6 +33,6 @@ $(OBJ_DIR):
 	mkdir $(OBJ_DIR)
 
 clean:
-	rmdir /s /q $(OBJ_DIR) 2>nul || del /q $(TARGET).exe 2>nul
+	rm -rf $(OBJ_DIR) $(TARGET) server
 
 .PHONY: all clean

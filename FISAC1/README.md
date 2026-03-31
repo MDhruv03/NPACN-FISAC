@@ -1,4 +1,4 @@
-# Real-Time Location Sharing Web Application
+# Group 12 -> Real-Time Location Sharing Web Application
 
 A secure real-time location sharing web application built with C (WinSock2), WebSockets, SQLite3, and vanilla JavaScript.
 
@@ -142,25 +142,3 @@ python chaos_test.py
 cd scripts
 python log_analyzer.py
 ```
-
-## Key Design Decisions
-
-### Why `select()` over threads?
-- No synchronization overhead (no mutexes, no race conditions)
-- Lower memory footprint
-- Simpler code, fewer concurrency bugs
-- Sufficient for I/O-bound relay workloads
-- Safe concurrent access to shared client list
-
-### Why SQLite over PostgreSQL?
-- Zero-configuration, embedded database
-- No external dependencies or services to install
-- Single-file database (`fisac.db`)
-- WAL mode for concurrent read/write performance
-- Perfect for this application's scale
-
-### Why WebSocket over raw TCP?
-- Browser-native support (no plugins needed)
-- HTTP-compatible (passes through firewalls)
-- Message-based framing (vs TCP's stream)
-- Standard protocol (RFC 6455)

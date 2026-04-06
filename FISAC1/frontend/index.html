@@ -127,6 +127,154 @@
                 </div>
             </div>
 
+            <div class="sidebar-section">
+                <h3>Q1-Q4 Alignment</h3>
+                <div class="qa-grid">
+                    <div class="qa-card">
+                        <span class="qa-label">Q1 Workflow</span>
+                        <span class="qa-state pending" id="qa-q1-state">Pending</span>
+                    </div>
+                    <div class="qa-card">
+                        <span class="qa-label">Q2 Storage/Broadcast</span>
+                        <span class="qa-state pending" id="qa-q2-state">Pending</span>
+                    </div>
+                    <div class="qa-card">
+                        <span class="qa-label">Q3 Socket Profile</span>
+                        <span class="qa-state pending" id="qa-q3-state">Unknown</span>
+                    </div>
+                    <div class="qa-card">
+                        <span class="qa-label">Q4 Robustness</span>
+                        <span class="qa-state pending" id="qa-q4-state">Pending</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <h3>Workflow Timeline</h3>
+                <div class="workflow-list">
+                    <div class="workflow-step">
+                        <span class="workflow-name">Socket Connected</span>
+                        <span class="workflow-state pending" id="wf-connect-state">Pending</span>
+                    </div>
+                    <div class="workflow-step">
+                        <span class="workflow-name">Auth Request Sent</span>
+                        <span class="workflow-state pending" id="wf-auth-send-state">Pending</span>
+                    </div>
+                    <div class="workflow-step">
+                        <span class="workflow-name">Auth Accepted</span>
+                        <span class="workflow-state pending" id="wf-auth-ok-state">Pending</span>
+                    </div>
+                    <div class="workflow-step">
+                        <span class="workflow-name">Subscribed</span>
+                        <span class="workflow-state pending" id="wf-sub-state">Pending</span>
+                    </div>
+                    <div class="workflow-step">
+                        <span class="workflow-name">Location Streaming</span>
+                        <span class="workflow-state pending" id="wf-stream-state">Pending</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <h3>Live Highlights</h3>
+                <div class="highlights-grid">
+                    <div class="highlight-card">
+                        <span class="highlight-label">Distance</span>
+                        <span class="highlight-value" id="metric-distance">0.00 km</span>
+                    </div>
+                    <div class="highlight-card">
+                        <span class="highlight-label">Updates / Min</span>
+                        <span class="highlight-value" id="metric-rate">0</span>
+                    </div>
+                    <div class="highlight-card">
+                        <span class="highlight-label">Peak Peers</span>
+                        <span class="highlight-value" id="metric-peak-peers">0</span>
+                    </div>
+                    <div class="highlight-card">
+                        <span class="highlight-label">Session Events</span>
+                        <span class="highlight-value" id="metric-events">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <h3>Backend Evidence</h3>
+                <div class="backend-grid">
+                    <div class="backend-item">
+                        <span class="backend-label">Backend</span>
+                        <span class="backend-value" id="backend-state">Offline</span>
+                    </div>
+                    <div class="backend-item">
+                        <span class="backend-label">Socket Profile</span>
+                        <span class="backend-value" id="backend-profile">Unknown</span>
+                    </div>
+                    <div class="backend-item">
+                        <span class="backend-label">Users</span>
+                        <span class="backend-value" id="backend-users">0</span>
+                    </div>
+                    <div class="backend-item">
+                        <span class="backend-label">Locations</span>
+                        <span class="backend-value" id="backend-locations">0</span>
+                    </div>
+                    <div class="backend-item">
+                        <span class="backend-label">Logs</span>
+                        <span class="backend-value" id="backend-logs">0</span>
+                    </div>
+                    <div class="backend-item">
+                        <span class="backend-label">Last Sync</span>
+                        <span class="backend-value" id="backend-sync">Never</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <h3>Robustness Snapshot</h3>
+                <div class="robust-grid">
+                    <div class="robust-item">
+                        <span class="robust-label">Reconnects</span>
+                        <span class="robust-value" id="robust-reconnects">0</span>
+                    </div>
+                    <div class="robust-item">
+                        <span class="robust-label">Auth Fails</span>
+                        <span class="robust-value" id="robust-auth-fail">0</span>
+                    </div>
+                    <div class="robust-item">
+                        <span class="robust-label">Malformed Sent</span>
+                        <span class="robust-value" id="robust-malformed">0</span>
+                    </div>
+                    <div class="robust-item">
+                        <span class="robust-label">Geo Fallbacks</span>
+                        <span class="robust-value" id="robust-geo-fallback">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <h3>Protocol Inspector</h3>
+                <div class="protocol-grid">
+                    <div class="protocol-card">
+                        <span class="protocol-label">Last TX</span>
+                        <pre class="protocol-json" id="proto-tx">—</pre>
+                    </div>
+                    <div class="protocol-card">
+                        <span class="protocol-label">Last RX</span>
+                        <pre class="protocol-json" id="proto-rx">—</pre>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <h3>Demo Controls</h3>
+                <div class="demo-actions">
+                    <button class="btn-secondary" id="btn-demo-route" onclick="toggleDemoRoute()">Start Demo Route</button>
+                    <button class="btn-secondary" onclick="runBurstTest()">Run Burst x25</button>
+                    <button class="btn-secondary" onclick="sendMalformedPayload()">Send Malformed Payload</button>
+                    <button class="btn-secondary" onclick="runReconnectDrill()">Run Reconnect Drill</button>
+                    <button class="btn-secondary" onclick="clearTrails()">Clear Trails</button>
+                    <button class="btn-secondary" onclick="exportSessionSnapshot()">Export Snapshot</button>
+                </div>
+            </div>
+
             <div class="sidebar-section logs-section">
                 <h3>Event Log</h3>
                 <div class="logs" id="logs">
@@ -153,6 +301,9 @@
             </button>
             <div class="map-overlay-info" id="map-info">
                 <span id="map-zoom-level">Zoom: —</span>
+                <span id="map-peer-count">Peers: 0</span>
+                <span id="map-distance">Distance: 0.00 km</span>
+                <span id="map-profile">Profile: unknown</span>
             </div>
         </main>
     </div>

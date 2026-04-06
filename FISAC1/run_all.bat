@@ -82,7 +82,7 @@ del .backend.log >nul 2>&1
 del .server.log >nul 2>&1
 
 :: Launch processes detached and minimized
-start "" /min cmd /c "%PYTHON_CMD% scripts\service.py > .backend.log 2>&1"
+start "" /min cmd /c "set FISAC_SOCKOPTS_PROFILE=%SOCKOPT_PROFILE% && %PYTHON_CMD% scripts\service.py > .backend.log 2>&1"
 start "" /min cmd /c "set FISAC_SOCKOPTS_PROFILE=%SOCKOPT_PROFILE% && server.exe > .server.log 2>&1"
 echo [OK] Background services launched.
 
@@ -107,7 +107,7 @@ echo.
 echo [3/3] Opening Frontend...
 echo ------------------------------------------------
 :: Open Flask-served URL
-start "" "http://localhost:5000/"
+start "" "http://localhost:5000/?profile=%SOCKOPT_PROFILE%"
 echo [OK] Frontend opened in default browser.
 
 echo.

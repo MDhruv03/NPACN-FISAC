@@ -287,7 +287,8 @@ body {
     border-right: 1px solid var(--border);
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 .sidebar-header {
@@ -478,10 +479,253 @@ body {
     color: var(--text-secondary);
 }
 
+/* Assignment alignment */
+
+.qa-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+}
+
+.qa-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.22rem;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.5rem 0.6rem;
+}
+
+.qa-label {
+    font-size: 0.58rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.qa-state {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 600;
+}
+
+.qa-state.pending { color: var(--warning); }
+.qa-state.good { color: var(--success); }
+.qa-state.warn { color: var(--accent-blue); }
+
+/* Workflow timeline */
+
+.workflow-list {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.38rem;
+}
+
+.workflow-step {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.45rem 0.58rem;
+}
+
+.workflow-name {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.workflow-state {
+    font-size: 0.65rem;
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 700;
+}
+
+.workflow-state.pending { color: var(--warning); }
+.workflow-state.done { color: var(--success); }
+
+/* Highlights */
+
+.highlights-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+}
+
+.highlight-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    background: linear-gradient(145deg, rgba(96, 165, 250, 0.08), rgba(110, 231, 183, 0.08));
+    padding: 0.55rem 0.65rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid rgba(110, 231, 183, 0.2);
+}
+
+.highlight-label {
+    font-size: 0.58rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+}
+
+.highlight-value {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+/* Backend evidence */
+
+.backend-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.45rem;
+}
+
+.backend-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.18rem;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.5rem 0.58rem;
+}
+
+.backend-label {
+    font-size: 0.56rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--text-muted);
+}
+
+.backend-value {
+    font-size: 0.74rem;
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+/* Robustness snapshot */
+
+.robust-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.45rem;
+}
+
+.robust-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    background: rgba(59, 130, 246, 0.08);
+    border: 1px solid rgba(96, 165, 250, 0.25);
+    border-radius: var(--radius-sm);
+    padding: 0.48rem 0.58rem;
+}
+
+.robust-label {
+    font-size: 0.56rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--text-muted);
+}
+
+.robust-value {
+    font-size: 0.76rem;
+    font-family: var(--font-mono);
+    color: var(--accent-blue);
+    font-weight: 600;
+}
+
+/* Protocol inspector */
+
+.protocol-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.45rem;
+}
+
+.protocol-card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.45rem 0.6rem;
+}
+
+.protocol-label {
+    display: block;
+    font-size: 0.58rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 0.25rem;
+}
+
+.protocol-json {
+    margin: 0;
+    max-height: 88px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    color: var(--accent-blue);
+    line-height: 1.35;
+}
+
+/* Demo actions */
+
+.demo-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.4rem;
+}
+
+.btn-secondary {
+    padding: 0.5rem 0.65rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: 0.75rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: var(--transition);
+    text-align: left;
+}
+
+.btn-secondary:hover {
+    border-color: var(--border-active);
+    color: var(--text-primary);
+}
+
+.btn-secondary.active {
+    background: rgba(110, 231, 183, 0.12);
+    border-color: rgba(110, 231, 183, 0.45);
+    color: var(--accent-green);
+}
+
 /* Logs */
 
 .logs-section {
-    flex: 1;
+    flex: 0 0 auto;
+    min-height: 180px;
+    max-height: 260px;
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -495,6 +739,7 @@ body {
 .logs {
     flex: 1;
     overflow-y: auto;
+    max-height: 180px;
     font-family: var(--font-mono);
     font-size: 0.7rem;
     display: flex;
@@ -645,6 +890,10 @@ body {
     font-family: var(--font-mono);
     font-size: 0.7rem;
     color: var(--text-secondary);
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    min-width: 170px;
 }
 
 /* ---- Scrollbar ---- */
@@ -660,12 +909,15 @@ body {
     .sidebar {
         width: 100%;
         min-width: unset;
-        height: 50vh;
+        height: 56vh;
     }
     .app {
         flex-direction: column-reverse;
     }
     .map-container {
-        height: 50vh;
+        height: 44vh;
+    }
+    .logs-section {
+        max-height: 220px;
     }
 }

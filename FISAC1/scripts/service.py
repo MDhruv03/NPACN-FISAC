@@ -1,10 +1,12 @@
 import sqlite3
 import os
 import hashlib
+import time
 from flask import Flask, request, jsonify, send_from_directory
 
 app = Flask(__name__, static_folder='../frontend', static_url_path='/')
 DB_PATH = 'fisac.db'
+START_TIME = time.time()
 
 def hash_password(password):
     # Match the djb2 hash in database.c exactly.
@@ -140,6 +142,32 @@ def log_event():
             except:
                 pass
     return jsonify({"success": True})
+
+@app.route('/stats', methods=['GET'])
+def stats():
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            users = cur.execute("SELECT COUNT(*) AS c FROM users").fetchone()[0]
+            locations = cur.execute("SELECT COUNT(*) AS c FROM locations").fetchone()[0]
+            logs = cur.execute("SELECT COUNT(*) AS c FROM logs").fetchone()[0]
+            last_location = cur.execute("SELECT MAX(timestamp) FROM locations").fetchone()[0]
+            last_log = cur.execute("SELECT MAX(timestamp) FROM logs").fetchone()[0]
+
+        return jsonify({
+            "success": True,
+            "socket_profile": os.getenv('FISAC_SOCKOPTS_PROFILE', 'unknown'),
+            "service_uptime_s": int(max(0, time.time() - START_TIME)),
+            "db": {
+                "users": users,
+                "locations": locations,
+                "logs": logs,
+                "last_location": last_location,
+                "last_log": last_log,
+            }
+        })
+    except Exception:
+        return jsonify({"success": False, "message": "stats_unavailable"}), 500
 
 if __name__ == '__main__':
     print("Initializing Database...")

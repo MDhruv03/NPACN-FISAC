@@ -1,5 +1,6 @@
 /* ============================
    GeoSync — Client Application
+    ============================ */
 
 /* ---- Global Error Capture ---- */
 window.onerror = function(msg, url, lineNo, columnNo, error) {
@@ -37,6 +38,51 @@ let connectTime = null;
 let uptimeInterval = null;
 let latencyStart = 0;
 let authTimeoutId = null;
+let eventCount = 0;
+let peakPeers = 0;
+let totalDistanceKm = 0;
+let myTrail = [];
+let myTrailPolyline = null;
+let updateTimestamps = [];
+let demoRouteEnabled = false;
+let demoRouteTimer = null;
+let demoRouteAngle = 0;
+let demoRouteCenter = { lat: 28.6139, lng: 77.2090 };
+let reconnectCount = 0;
+let authFailureCount = 0;
+let malformedSentCount = 0;
+let geolocationFallbackCount = 0;
+let burstRunCount = 0;
+let broadcastRxCount = 0;
+let parseErrorCount = 0;
+let lastAuthUsername = '';
+let lastAuthPassword = '';
+let manualSignOut = false;
+let backendStatsTimer = null;
+let activeSocketProfile = 'unknown';
+
+const workflowState = {
+    connected: false,
+    authSent: false,
+    authAccepted: false,
+    subscribed: false,
+    streaming: false,
+};
+
+const backendStats = {
+    online: false,
+    users: 0,
+    locations: 0,
+    logs: 0,
+    lastSync: 'Never',
+};
+
+const initialProfile = (new URLSearchParams(window.location.search).get('profile') || '').trim().toLowerCase();
+if (initialProfile) {
+    activeSocketProfile = initialProfile;
+}
+
+const peerTrails = {};
 
 /* Color palette for user markers */
 const USER_COLORS = [
@@ -75,10 +121,175 @@ const UI = {
     statTx: document.getElementById('stat-tx'),
     statRx: document.getElementById('stat-rx'),
     statUptime: document.getElementById('stat-uptime'),
+    qaQ1State: document.getElementById('qa-q1-state'),
+    qaQ2State: document.getElementById('qa-q2-state'),
+    qaQ3State: document.getElementById('qa-q3-state'),
+    qaQ4State: document.getElementById('qa-q4-state'),
+    wfConnect: document.getElementById('wf-connect-state'),
+    wfAuthSend: document.getElementById('wf-auth-send-state'),
+    wfAuthOk: document.getElementById('wf-auth-ok-state'),
+    wfSubscribe: document.getElementById('wf-sub-state'),
+    wfStream: document.getElementById('wf-stream-state'),
+    metricDistance: document.getElementById('metric-distance'),
+    metricRate: document.getElementById('metric-rate'),
+    metricPeakPeers: document.getElementById('metric-peak-peers'),
+    metricEvents: document.getElementById('metric-events'),
+    backendState: document.getElementById('backend-state'),
+    backendProfile: document.getElementById('backend-profile'),
+    backendUsers: document.getElementById('backend-users'),
+    backendLocations: document.getElementById('backend-locations'),
+    backendLogs: document.getElementById('backend-logs'),
+    backendSync: document.getElementById('backend-sync'),
+    robustReconnects: document.getElementById('robust-reconnects'),
+    robustAuthFail: document.getElementById('robust-auth-fail'),
+    robustMalformed: document.getElementById('robust-malformed'),
+    robustGeoFallback: document.getElementById('robust-geo-fallback'),
+    protoTx: document.getElementById('proto-tx'),
+    protoRx: document.getElementById('proto-rx'),
+    btnDemoRoute: document.getElementById('btn-demo-route'),
     logs: document.getElementById('logs'),
     userBadge: document.getElementById('user-badge'),
     mapZoom: document.getElementById('map-zoom-level'),
+    mapPeerCount: document.getElementById('map-peer-count'),
+    mapDistance: document.getElementById('map-distance'),
+    mapProfile: document.getElementById('map-profile'),
 };
+
+eventCount = UI.logs ? UI.logs.children.length : 0;
+
+function prettyJson(data) {
+    if (typeof data === 'string') {
+        return data;
+    }
+    try {
+        return JSON.stringify(data, null, 2);
+    } catch (_err) {
+        return String(data);
+    }
+}
+
+function updateProtocolTrace(direction, data) {
+    const target = direction === 'tx' ? UI.protoTx : UI.protoRx;
+    if (!target) return;
+    target.textContent = prettyJson(data);
+}
+
+function updateDemoRouteButton() {
+    if (!UI.btnDemoRoute) return;
+    UI.btnDemoRoute.textContent = demoRouteEnabled ? 'Stop Demo Route' : 'Start Demo Route';
+    UI.btnDemoRoute.classList.toggle('active', demoRouteEnabled);
+}
+
+function setStateBadge(element, text, stateClass) {
+    if (!element) return;
+    element.textContent = text;
+    element.classList.remove('pending', 'good', 'warn', 'done');
+    if (stateClass) {
+        element.classList.add(stateClass);
+    }
+}
+
+function profileLabel(profile) {
+    const normalized = (profile || 'unknown').toLowerCase();
+    if (normalized === 'tuned') return 'Tuned';
+    if (normalized === 'baseline') return 'Baseline';
+    return 'Unknown';
+}
+
+function updateWorkflowIndicators() {
+    setStateBadge(UI.wfConnect, workflowState.connected ? 'Done' : 'Pending', workflowState.connected ? 'done' : 'pending');
+    setStateBadge(UI.wfAuthSend, workflowState.authSent ? 'Done' : 'Pending', workflowState.authSent ? 'done' : 'pending');
+    setStateBadge(UI.wfAuthOk, workflowState.authAccepted ? 'Done' : 'Pending', workflowState.authAccepted ? 'done' : 'pending');
+    setStateBadge(UI.wfSubscribe, workflowState.subscribed ? 'Done' : 'Pending', workflowState.subscribed ? 'done' : 'pending');
+    setStateBadge(UI.wfStream, workflowState.streaming ? 'Done' : 'Pending', workflowState.streaming ? 'done' : 'pending');
+}
+
+function markWorkflowStep(stepKey, isDone) {
+    if (!(stepKey in workflowState)) return;
+    workflowState[stepKey] = !!isDone;
+    updateWorkflowIndicators();
+}
+
+function resetWorkflowState() {
+    Object.keys(workflowState).forEach((key) => {
+        workflowState[key] = false;
+    });
+    updateWorkflowIndicators();
+}
+
+function updateQuestionAlignment() {
+    const workflowDoneCount = Object.values(workflowState).filter(Boolean).length;
+    const q1Ready = workflowDoneCount === 5;
+    setStateBadge(UI.qaQ1State, q1Ready ? 'Ready' : `${workflowDoneCount}/5`, q1Ready ? 'good' : 'pending');
+
+    const q2Ready = backendStats.online && backendStats.users > 0 && backendStats.locations > 0 && backendStats.logs > 0;
+    const q2Label = q2Ready ? `Ready (${broadcastRxCount} RX)` : (backendStats.online ? 'In Progress' : 'Waiting');
+    setStateBadge(UI.qaQ2State, q2Label, q2Ready ? 'good' : (backendStats.online ? 'warn' : 'pending'));
+
+    const profileText = profileLabel(activeSocketProfile);
+    const q3Class = profileText === 'Unknown' ? 'pending' : (profileText === 'Tuned' ? 'good' : 'warn');
+    setStateBadge(UI.qaQ3State, profileText, q3Class);
+
+    const robustnessScore = reconnectCount + malformedSentCount + geolocationFallbackCount + burstRunCount;
+    const q4Label = robustnessScore > 0 ? `Active (${robustnessScore})` : 'Pending';
+    setStateBadge(UI.qaQ4State, q4Label, robustnessScore > 0 ? 'good' : 'pending');
+}
+
+function updateBackendEvidenceUI() {
+    if (UI.backendState) UI.backendState.textContent = backendStats.online ? 'Online' : 'Offline';
+    if (UI.backendUsers) UI.backendUsers.textContent = `${backendStats.users}`;
+    if (UI.backendLocations) UI.backendLocations.textContent = `${backendStats.locations}`;
+    if (UI.backendLogs) UI.backendLogs.textContent = `${backendStats.logs}`;
+    if (UI.backendSync) UI.backendSync.textContent = backendStats.lastSync;
+
+    const profileText = profileLabel(activeSocketProfile);
+    if (UI.backendProfile) UI.backendProfile.textContent = profileText;
+    if (UI.mapProfile) UI.mapProfile.textContent = `Profile: ${profileText.toLowerCase()}`;
+
+    updateQuestionAlignment();
+}
+
+async function fetchBackendStats() {
+    try {
+        const response = await fetch('/stats', { cache: 'no-store' });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        const payload = await response.json();
+        if (payload && payload.success) {
+            backendStats.online = true;
+            backendStats.users = Number(payload.db?.users || 0);
+            backendStats.locations = Number(payload.db?.locations || 0);
+            backendStats.logs = Number(payload.db?.logs || 0);
+            backendStats.lastSync = new Date().toISOString().substring(11, 19);
+
+            const profile = String(payload.socket_profile || '').trim().toLowerCase();
+            if (profile) {
+                activeSocketProfile = profile;
+            }
+        }
+    } catch (_error) {
+        backendStats.online = false;
+    }
+
+    updateBackendEvidenceUI();
+}
+
+function startBackendStatsPolling() {
+    if (backendStatsTimer) {
+        clearInterval(backendStatsTimer);
+    }
+    fetchBackendStats();
+    backendStatsTimer = setInterval(fetchBackendStats, 4000);
+}
+
+function stopBackendStatsPolling() {
+    if (backendStatsTimer) {
+        clearInterval(backendStatsTimer);
+        backendStatsTimer = null;
+    }
+}
 
 /* ---- Logging ---- */
 
@@ -88,11 +299,13 @@ function log(msg, type = 'system') {
     const time = new Date().toISOString().substring(11, 19);
     el.textContent = `[${time}] ${msg}`;
     UI.logs.appendChild(el);
+    eventCount++;
     UI.logs.scrollTop = UI.logs.scrollHeight;
     /* Keep log buffer small */
     while (UI.logs.children.length > 100) {
         UI.logs.removeChild(UI.logs.firstChild);
     }
+    updatePresentationMetrics();
 }
 
 /* ---- Auth Tab Switching ---- */
@@ -123,12 +336,18 @@ window.handleAuth = function(e) {
     UI.authSpinner.style.display = 'block';
     UI.authSubmitBtn.disabled = true;
 
+    lastAuthUsername = username;
+    lastAuthPassword = password;
+    manualSignOut = false;
+
     /* Connect WebSocket, then send auth */
     connectAndAuth(username, password);
     return false;
 };
 
 function connectAndAuth(username, password) {
+    resetWorkflowState();
+
     if (ws) {
         ws.close();
         ws = null;
@@ -143,14 +362,14 @@ function connectAndAuth(username, password) {
     ws = new WebSocket('ws://localhost:8080');
 
     ws.onopen = () => {
+        markWorkflowStep('connected', true);
         log('WebSocket connected. Sending auth request...', 'system');
         /* Send auth or register message */
         const msg = {
             type: authMode === 'register' ? 'register' : 'auth',
             payload: { username, password }
         };
-        ws.send(JSON.stringify(msg));
-        txCount++;
+        sendWsPayload(msg);
         log(`Sent ${msg.type.toUpperCase()} request to server.`, 'tx');
 
         /* Guard against hanging forever if auth_response never arrives. */
@@ -172,13 +391,17 @@ function connectAndAuth(username, password) {
         UI.statRx.textContent = rxCount;
         try {
             const data = JSON.parse(e.data);
+            updateProtocolTrace('rx', data);
             if (data && data.type === 'auth_response' && authTimeoutId) {
                 clearTimeout(authTimeoutId);
                 authTimeoutId = null;
             }
             handleServerMessage(data);
+            updatePresentationMetrics();
         } catch (err) {
+            parseErrorCount++;
             log(`Parse error: ${err.message}`, 'err');
+            updatePresentationMetrics();
         }
     };
 
@@ -194,18 +417,25 @@ function connectAndAuth(username, password) {
     };
 
     ws.onclose = (code) => {
+        const wasConnected = state === STATE.CONNECTED;
         if (authTimeoutId) {
             clearTimeout(authTimeoutId);
             authTimeoutId = null;
         }
+        if (wasConnected && !manualSignOut) {
+            reconnectCount++;
+        }
+        manualSignOut = false;
         updateConnectionState(STATE.DISCONNECTED);
         log(`Connection closed (code: ${code.code}).`, 'system');
+        stopDemoRoute(false, true);
         stopSharing();
         resetAuthButton(); // Ensure button is clickable again
         if (connectTime) {
             clearInterval(uptimeInterval);
             connectTime = null;
         }
+        updatePresentationMetrics();
     };
 }
 
@@ -236,10 +466,17 @@ function handleServerMessage(data) {
 
 function handleAuthResponse(payload) {
     try {
+        if (latencyStart > 0) {
+            const authLatency = Math.max(1, Math.round(performance.now() - latencyStart));
+            UI.statLatency.textContent = `${authLatency}ms`;
+            latencyStart = 0;
+        }
+
         if (payload.success) {
             myUsername = payload.username;
             myUserId = payload.user_id;
             UI.authError.textContent = '';
+            markWorkflowStep('authAccepted', true);
 
             /* Transition to main app */
             UI.authOverlay.style.display = 'none';
@@ -265,10 +502,15 @@ function handleAuthResponse(payload) {
 
             /* Subscribe to location channel */
             sendMessage({ type: 'subscribe', payload: { channel: 'locations' } });
+            markWorkflowStep('subscribed', true);
+            startBackendStatsPolling();
+            updatePresentationMetrics();
         } else {
             UI.authError.textContent = payload.message || 'Authentication failed';
             resetAuthButton();
+            authFailureCount++;
             log(`Auth failed: ${payload.message}`, 'err');
+            updatePresentationMetrics();
         }
     } catch (err) {
         log(`Transition Error: ${err.message}`, 'err');
@@ -281,11 +523,18 @@ function handleLocationUpdate(payload) {
     if (!payload) return;
     const { latitude, longitude, userId } = payload;
     const srcId = userId || 'Unknown';
+    const lat = Number(latitude);
+    const lon = Number(longitude);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        return;
+    }
 
     if (srcId === myUsername) return; /* Ignore own broadcasts */
 
-    log(`RX: ${srcId} @ [${latitude.toFixed(4)}, ${longitude.toFixed(4)}]`, 'rx');
-    updateOtherUser(srcId, latitude, longitude);
+    broadcastRxCount++;
+    log(`RX: ${srcId} @ [${lat.toFixed(4)}, ${lon.toFixed(4)}]`, 'rx');
+    updateOtherUser(srcId, lat, lon);
 }
 
 /* ---- Connection State ---- */
@@ -297,16 +546,56 @@ function updateConnectionState(newState) {
         case STATE.DISCONNECTED:
             UI.dot.classList.add('disconnected');
             UI.status.textContent = 'Offline';
+            markWorkflowStep('connected', false);
             break;
         case STATE.CONNECTING:
             UI.dot.classList.add('connecting');
             UI.status.textContent = 'Connecting';
+            markWorkflowStep('connected', false);
             break;
         case STATE.CONNECTED:
             UI.dot.classList.add('connected');
             UI.status.textContent = 'Live';
+            markWorkflowStep('connected', true);
             break;
     }
+}
+
+function haversineKm(lat1, lon1, lat2, lon2) {
+    const toRad = (value) => (value * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat / 2) ** 2
+        + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return 6371 * c;
+}
+
+function pruneUpdateWindow() {
+    const cutoff = Date.now() - 60000;
+    while (updateTimestamps.length > 0 && updateTimestamps[0] < cutoff) {
+        updateTimestamps.shift();
+    }
+}
+
+function updatePresentationMetrics() {
+    pruneUpdateWindow();
+
+    if (UI.metricDistance) UI.metricDistance.textContent = `${totalDistanceKm.toFixed(2)} km`;
+    if (UI.metricRate) UI.metricRate.textContent = `${updateTimestamps.length}`;
+    if (UI.metricPeakPeers) UI.metricPeakPeers.textContent = `${peakPeers}`;
+    if (UI.metricEvents) UI.metricEvents.textContent = `${eventCount}`;
+    if (UI.robustReconnects) UI.robustReconnects.textContent = `${reconnectCount}`;
+    if (UI.robustAuthFail) UI.robustAuthFail.textContent = `${authFailureCount}`;
+    if (UI.robustMalformed) UI.robustMalformed.textContent = `${malformedSentCount}`;
+    if (UI.robustGeoFallback) UI.robustGeoFallback.textContent = `${geolocationFallbackCount}`;
+
+    const peerCount = Object.keys(others).length;
+    if (UI.mapPeerCount) UI.mapPeerCount.textContent = `Peers: ${peerCount}`;
+    if (UI.mapDistance) UI.mapDistance.textContent = `Distance: ${totalDistanceKm.toFixed(2)} km`;
+    if (UI.mapProfile) UI.mapProfile.textContent = `Profile: ${profileLabel(activeSocketProfile).toLowerCase()}`;
+
+    updateQuestionAlignment();
 }
 
 /* ---- Map ---- */
@@ -327,8 +616,10 @@ function initMap() {
 
     map.on('zoomend', () => {
         UI.mapZoom.textContent = `Zoom: ${map.getZoom()}`;
+        updatePresentationMetrics();
     });
     UI.mapZoom.textContent = `Zoom: ${map.getZoom()}`;
+    updatePresentationMetrics();
 }
 
 function createPulseIcon(color, isSelf) {
@@ -362,7 +653,36 @@ function updateMyLocation(lat, lon) {
     UI.myLat.textContent = lat.toFixed(6);
     UI.myLon.textContent = lon.toFixed(6);
 
-    if (!map) return;
+    updateTimestamps.push(Date.now());
+
+    if (myTrail.length > 0) {
+        const [prevLat, prevLon] = myTrail[myTrail.length - 1];
+        const segmentKm = haversineKm(prevLat, prevLon, lat, lon);
+        if (segmentKm > 0.002 && segmentKm < 5) {
+            totalDistanceKm += segmentKm;
+        }
+    }
+
+    myTrail.push([lat, lon]);
+    if (myTrail.length > 260) {
+        myTrail.shift();
+    }
+
+    if (!map) {
+        updatePresentationMetrics();
+        return;
+    }
+
+    if (!myTrailPolyline) {
+        myTrailPolyline = L.polyline(myTrail, {
+            color: '#34d399',
+            weight: 3,
+            opacity: 0.72,
+            lineCap: 'round'
+        }).addTo(map);
+    } else {
+        myTrailPolyline.setLatLngs(myTrail);
+    }
 
     if (!myMarker) {
         myMarker = L.marker([lat, lon], {
@@ -374,6 +694,8 @@ function updateMyLocation(lat, lon) {
     } else {
         myMarker.setLatLng([lat, lon]);
     }
+
+    updatePresentationMetrics();
 }
 
 function updateOtherUser(userId, lat, lon) {
@@ -386,14 +708,30 @@ function updateOtherUser(userId, lat, lon) {
         }).addTo(map);
         marker.bindTooltip(String(userId), { permanent: true, direction: 'top', className: 'marker-tooltip' });
 
-        others[userId] = { marker, lat, lon, username: userId, color };
+        others[userId] = { marker, lat, lon, username: userId, color, trail: [[lat, lon]] };
+        peerTrails[userId] = L.polyline(others[userId].trail, {
+            color,
+            weight: 2,
+            opacity: 0.58,
+            dashArray: '5 7',
+            lineCap: 'round'
+        }).addTo(map);
     } else {
         others[userId].marker.setLatLng([lat, lon]);
         others[userId].lat = lat;
         others[userId].lon = lon;
+        others[userId].trail.push([lat, lon]);
+        if (others[userId].trail.length > 160) {
+            others[userId].trail.shift();
+        }
+        if (peerTrails[userId]) {
+            peerTrails[userId].setLatLngs(others[userId].trail);
+        }
     }
 
+    peakPeers = Math.max(peakPeers, Object.keys(others).length);
     updateUserList();
+    updatePresentationMetrics();
 }
 
 function updateUserList() {
@@ -425,7 +763,23 @@ window.flyToUser = function(id) {
 
 /* ---- Location Sharing ---- */
 
+function emitOwnLocation(lat, lon) {
+    updateMyLocation(lat, lon);
+    markWorkflowStep('streaming', true);
+
+    if (state === STATE.CONNECTED && ws && ws.readyState === WebSocket.OPEN) {
+        sendWsPayload({
+            type: 'location',
+            payload: { latitude: lat, longitude: lon, userId: myUsername }
+        });
+    }
+}
+
 function startSharing() {
+    if (demoRouteEnabled) {
+        return;
+    }
+
     if (!navigator.geolocation) {
         log('Geolocation not supported by browser.', 'err');
         return;
@@ -435,34 +789,16 @@ function startSharing() {
         (pos) => {
             const lat = pos.coords.latitude;
             const lon = pos.coords.longitude;
-
-            updateMyLocation(lat, lon);
-
-            if (state === STATE.CONNECTED && ws && ws.readyState === WebSocket.OPEN) {
-                const msg = {
-                    type: 'location',
-                    payload: { latitude: lat, longitude: lon, userId: myUsername }
-                };
-                ws.send(JSON.stringify(msg));
-                txCount++;
-                UI.statTx.textContent = txCount;
-            }
+            emitOwnLocation(lat, lon);
         },
         (err) => {
             log(`Geolocation error: ${err.message}`, 'err');
+            geolocationFallbackCount++;
             /* Fallback: use a simulated position for demo */
             const fakeLat = 28.6139 + (Math.random() - 0.5) * 0.01;
             const fakeLon = 77.2090 + (Math.random() - 0.5) * 0.01;
-            updateMyLocation(fakeLat, fakeLon);
-            if (state === STATE.CONNECTED && ws && ws.readyState === WebSocket.OPEN) {
-                const msg = {
-                    type: 'location',
-                    payload: { latitude: fakeLat, longitude: fakeLon, userId: myUsername }
-                };
-                ws.send(JSON.stringify(msg));
-                txCount++;
-                UI.statTx.textContent = txCount;
-            }
+            emitOwnLocation(fakeLat, fakeLon);
+            updatePresentationMetrics();
         },
         { enableHighAccuracy: true, maximumAge: 2000, timeout: 10000 }
     );
@@ -479,12 +815,31 @@ function stopSharing() {
 
 /* ---- Utility ---- */
 
-function sendMessage(msg) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(msg));
-        txCount++;
-        UI.statTx.textContent = txCount;
+function sendWsPayload(msg) {
+    if (!(ws && ws.readyState === WebSocket.OPEN)) {
+        return false;
     }
+
+    ws.send(JSON.stringify(msg));
+    txCount++;
+    UI.statTx.textContent = txCount;
+    updateProtocolTrace('tx', msg);
+
+    if (msg.type === 'auth' || msg.type === 'register') {
+        latencyStart = performance.now();
+        markWorkflowStep('authSent', true);
+    }
+
+    if (msg.type === 'subscribe') {
+        markWorkflowStep('subscribed', true);
+    }
+
+    updatePresentationMetrics();
+    return true;
+}
+
+function sendMessage(msg) {
+    sendWsPayload(msg);
 }
 
 function updateUptime() {
@@ -501,6 +856,198 @@ function updateUptime() {
     }
 }
 
+function startDemoRoute() {
+    if (demoRouteEnabled) {
+        return;
+    }
+
+    if (state !== STATE.CONNECTED) {
+        log('Connect first before starting Demo Route.', 'warn');
+        return;
+    }
+    if (!map) {
+        log('Map not ready yet. Try again in a second.', 'warn');
+        return;
+    }
+
+    stopSharing();
+    demoRouteEnabled = true;
+    demoRouteAngle = 0;
+
+    if (myMarker) {
+        const pos = myMarker.getLatLng();
+        demoRouteCenter = { lat: pos.lat, lng: pos.lng };
+    }
+
+    demoRouteTimer = setInterval(() => {
+        demoRouteAngle = (demoRouteAngle + 14) % 360;
+        const radians = (demoRouteAngle * Math.PI) / 180;
+        const radius = 0.0024;
+        const lat = demoRouteCenter.lat + Math.cos(radians) * radius;
+        const lon = demoRouteCenter.lng + Math.sin(radians) * (radius * 1.35);
+        emitOwnLocation(lat, lon);
+    }, 1200);
+
+    updateDemoRouteButton();
+    log('Demo route started (simulated orbit movement).', 'system');
+}
+
+function stopDemoRoute(resumeGeo = true, silent = false) {
+    const wasEnabled = demoRouteEnabled;
+    demoRouteEnabled = false;
+
+    if (demoRouteTimer) {
+        clearInterval(demoRouteTimer);
+        demoRouteTimer = null;
+    }
+
+    updateDemoRouteButton();
+
+    if (wasEnabled && !silent) {
+        log('Demo route stopped.', 'system');
+    }
+
+    if (resumeGeo && state === STATE.CONNECTED) {
+        startSharing();
+    }
+}
+
+window.toggleDemoRoute = function() {
+    if (demoRouteEnabled) {
+        stopDemoRoute(true, false);
+    } else {
+        startDemoRoute();
+    }
+};
+
+window.runBurstTest = function() {
+    if (!(ws && ws.readyState === WebSocket.OPEN) || state !== STATE.CONNECTED) {
+        log('Connect and authenticate before running burst test.', 'warn');
+        return;
+    }
+
+    const anchor = myMarker ? myMarker.getLatLng() : { lat: demoRouteCenter.lat, lng: demoRouteCenter.lng };
+    burstRunCount++;
+
+    for (let i = 0; i < 25; i++) {
+        const offset = (i + 1) * 0.00003;
+        const lat = anchor.lat + (Math.sin(i * 0.6) * offset);
+        const lon = anchor.lng + (Math.cos(i * 0.6) * offset);
+        sendWsPayload({
+            type: 'location',
+            payload: { latitude: lat, longitude: lon, userId: myUsername }
+        });
+    }
+
+    log('Burst test sent 25 location frames.', 'system');
+    updatePresentationMetrics();
+};
+
+window.sendMalformedPayload = function() {
+    if (!(ws && ws.readyState === WebSocket.OPEN)) {
+        log('Open a live connection before sending malformed payload.', 'warn');
+        return;
+    }
+
+    ws.send('{"type":"location","payload":');
+    malformedSentCount++;
+    log('Malformed payload injected for robustness validation.', 'warn');
+    updatePresentationMetrics();
+};
+
+window.runReconnectDrill = function() {
+    if (!lastAuthUsername || !lastAuthPassword) {
+        log('Sign in first so reconnect drill can reuse your credentials.', 'warn');
+        return;
+    }
+
+    log('Reconnect drill started: cycling socket and re-authenticating.', 'system');
+    manualSignOut = false;
+
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.close();
+        setTimeout(() => {
+            connectAndAuth(lastAuthUsername, lastAuthPassword);
+        }, 900);
+    } else {
+        connectAndAuth(lastAuthUsername, lastAuthPassword);
+    }
+};
+
+window.clearTrails = function() {
+    myTrail = [];
+    totalDistanceKm = 0;
+
+    if (myTrailPolyline) {
+        myTrailPolyline.setLatLngs([]);
+    }
+
+    for (const id of Object.keys(others)) {
+        if (others[id].trail) {
+            others[id].trail = [];
+        }
+        if (peerTrails[id]) {
+            peerTrails[id].setLatLngs([]);
+        }
+    }
+
+    updatePresentationMetrics();
+    log('Movement trails cleared.', 'system');
+};
+
+window.exportSessionSnapshot = function() {
+    const peers = Object.keys(others).map((id) => ({
+        id,
+        latitude: others[id].lat,
+        longitude: others[id].lon
+    }));
+
+    const snapshot = {
+        generatedAt: new Date().toISOString(),
+        user: myUsername || null,
+        connected: state === STATE.CONNECTED,
+        metrics: {
+            tx: txCount,
+            rx: rxCount,
+            uptime: UI.statUptime ? UI.statUptime.textContent : '0s',
+            distanceKm: Number(totalDistanceKm.toFixed(3)),
+            updatesPerMinute: updateTimestamps.length,
+            peakPeers,
+            sessionEvents: eventCount,
+            reconnects: reconnectCount,
+            authFailures: authFailureCount,
+            malformedSent: malformedSentCount,
+            geolocationFallbacks: geolocationFallbackCount,
+            burstRuns: burstRunCount,
+            parseErrors: parseErrorCount,
+            broadcastRx: broadcastRxCount,
+            socketProfile: profileLabel(activeSocketProfile)
+        },
+        backendEvidence: {
+            online: backendStats.online,
+            users: backendStats.users,
+            locations: backendStats.locations,
+            logs: backendStats.logs,
+            lastSync: backendStats.lastSync
+        },
+        peers,
+        protocol: {
+            lastTx: UI.protoTx ? UI.protoTx.textContent : null,
+            lastRx: UI.protoRx ? UI.protoRx.textContent : null
+        }
+    };
+
+    const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `geosync-session-${Date.now()}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+
+    log('Session snapshot exported.', 'system');
+};
+
 window.recenterMap = function() {
     if (myMarker && map) {
         map.flyTo(myMarker.getLatLng(), 15, { duration: 0.5 });
@@ -508,14 +1055,44 @@ window.recenterMap = function() {
 };
 
 window.disconnect = function() {
+    manualSignOut = true;
     if (ws) ws.close();
+    stopBackendStatsPolling();
+    stopDemoRoute(false, true);
     stopSharing();
 
     /* Clear state */
     others = {};
+    Object.keys(peerTrails).forEach((id) => {
+        if (peerTrails[id]) {
+            peerTrails[id].remove();
+            delete peerTrails[id];
+        }
+    });
     txCount = 0;
     rxCount = 0;
+    peakPeers = 0;
+    totalDistanceKm = 0;
+    reconnectCount = 0;
+    authFailureCount = 0;
+    malformedSentCount = 0;
+    geolocationFallbackCount = 0;
+    burstRunCount = 0;
+    broadcastRxCount = 0;
+    parseErrorCount = 0;
+    myTrail = [];
+    updateTimestamps = [];
     myMarker = null;
+    myTrailPolyline = null;
+    latencyStart = 0;
+    UI.statLatency.textContent = '—';
+    UI.statTx.textContent = '0';
+    UI.statRx.textContent = '0';
+    UI.statUptime.textContent = '0s';
+
+    updateProtocolTrace('tx', '—');
+    updateProtocolTrace('rx', '—');
+
     if (map) {
         map.remove();
         map = null;
@@ -527,7 +1104,12 @@ window.disconnect = function() {
     resetAuthButton();
     UI.authError.textContent = '';
 
+    resetWorkflowState();
+
     log('Disconnected.', 'system');
+    updateDemoRouteButton();
+    updateBackendEvidenceUI();
+    updatePresentationMetrics();
 };
 
 /* ---- Tooltip styling injection ---- */
@@ -549,3 +1131,11 @@ tooltipStyle.textContent = `
     }
 `;
 document.head.appendChild(tooltipStyle);
+
+updateDemoRouteButton();
+updateProtocolTrace('tx', '—');
+updateProtocolTrace('rx', '—');
+resetWorkflowState();
+updateBackendEvidenceUI();
+fetchBackendStats();
+updatePresentationMetrics();

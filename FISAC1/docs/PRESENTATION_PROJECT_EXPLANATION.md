@@ -430,3 +430,472 @@ python scripts/profile_eval.py
 ## 18. Final Closing Statement
 
 This project demonstrates practical socket programming in C with real-time multi-client behavior, measurable tuning impact, persistent storage, and failure-oriented validation. The implementation is not only functional but also backed by reproducible evidence for each assignment question.
+
+---
+
+## 19. Communication Deep-Dive (Cross-Question Ready)
+
+This section is a detailed technical explanation of the complete communication pipeline in this project: browser <-> C server <-> Flask backend <-> SQLite.
+
+### 19.1 Communication Layers and Responsibilities
+
+| Layer | Technology | Direction | Responsibility |
+|---|---|---|---|
+| Browser <-> Server | WebSocket over TCP | Full-duplex | Real-time auth, subscribe, location publish, location receive |
+| C server internal | `select()` + WinSock2 | Event loop | Multi-client I/O multiplexing, frame handling, auth gate, broadcast |
+| C server <-> Flask | HTTP/1.0 over localhost TCP | Request-response | Auth/register validation, location persistence, event logs |
+| Flask <-> SQLite | SQLite (WAL) | Local DB ops | Durable storage for users, locations, logs |
+
+Important: in the current runnable architecture, real-time socket communication is in C, while persistence/auth are delegated to Flask.
+
+### 19.2 Boot Sequence and Channel Establishment
+
+1. `main()` initializes WinSock2 and starts server on `0.0.0.0:8080`.
+2. `server_init()` creates listening socket, applies socket options, binds, and marks listen socket non-blocking.
+3. `server_run()` enters `select()` loop and watches:
+   - the listening socket (new connection events), and
+   - all active client sockets (incoming data frames).
+4. New TCP connection accepted -> WebSocket handshake executed.
+5. Successful handshake -> client is inserted into free slot (`MAX_CLIENTS=30`) with unauthenticated state.
+
+Code excerpt:
+
+```c
+void server_run(Server *server) {
+  listen_on_socket(server->sock);
+  while (server->running) {
+    FD_ZERO(&readfds);
+    FD_SET(server->sock, &readfds);
+
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+      if (server->clients[i].sock != INVALID_SOCKET) {
+        FD_SET(server->clients[i].sock, &readfds);
+      }
+    }
+
+    timeout.tv_sec = 1;
+    timeout.tv_usec = 0;
+    int activity = select(0, &readfds, NULL, NULL, &timeout);
+
+    if (FD_ISSET(server->sock, &readfds)) {
+      SOCKET new_socket = accept(server->sock, ...);
+      unsigned long iMode = 0;
+      ioctlsocket(new_socket, FIONBIO, &iMode); /* force blocking */
+
+      if (websocket_handshake(new_socket) == 0) {
+        /* insert into free client slot */
+      }
+    }
+  }
+}
+```
+
+Teacher note: accepted sockets are explicitly switched back to blocking mode. This is intentional so frame assembly logic can reliably read exact byte counts without complex non-blocking state machines.
+
+### 19.3 WebSocket Handshake Internals (RFC6455)
+
+The server performs a standards-based HTTP upgrade:
+
+1. Reads incoming HTTP request until `\r\n\r\n`.
+2. Extracts `Sec-WebSocket-Key`.
+3. Concatenates with GUID `258EAFA5-E914-47DA-95CA-C5AB0DC85B11`.
+4. Computes SHA1 digest.
+5. Base64-encodes digest.
+6. Returns `HTTP/1.1 101 Switching Protocols` with `Sec-WebSocket-Accept`.
+
+Formula used:
+
+`Sec-WebSocket-Accept = Base64( SHA1( client_key + GUID ) )`
+
+Code excerpt:
+
+```c
+char *key_start = strstr(buffer, "Sec-WebSocket-Key: ");
+snprintf(concatenated_key, sizeof(concatenated_key), "%s%s", key_start, WEBSOCKET_GUID);
+
+sha1_init(&sha1_ctx);
+sha1_update(&sha1_ctx, (uint8_t *)concatenated_key, (int)strlen(concatenated_key));
+sha1_final(&sha1_ctx, sha1_digest);
+
+base64_encode(sha1_digest, SHA1_DIGEST_SIZE, base64_encoded);
+
+snprintf(response, sizeof(response),
+     "HTTP/1.1 101 Switching Protocols\r\n"
+     "Upgrade: websocket\r\n"
+     "Connection: Upgrade\r\n"
+     "Sec-WebSocket-Accept: %s\r\n\r\n",
+     base64_encoded);
+```
+
+### 19.4 WebSocket Frame Receive/Decode Path
+
+`websocket_frame_recv()` decodes one full frame per call.
+
+Frame parsing logic:
+
+- Reads first 2 header bytes.
+- Extracts opcode, mask bit, base payload length.
+- Handles extended lengths:
+  - `126` => next 2 bytes (16-bit length)
+  - `127` => next 8 bytes (64-bit length)
+- Reads 4-byte masking key when present.
+- Reads payload and unmasks it.
+- Handles control/data opcodes:
+  - `0x8` close => disconnect path
+  - `0x9` ping => replies with pong (`0xA`)
+  - `0xA` pong => ignore
+  - non-text opcodes => ignore gracefully
+
+Code excerpt:
+
+```c
+uint8_t opcode = header[0] & 0x0F;
+uint8_t mask = (header[1] >> 7) & 1;
+uint64_t payload_len = header[1] & 0x7F;
+
+if (payload_len == 126) {
+  uint16_t len;
+  recv_exact(client_sock, (char *)&len, 2);
+  payload_len = ntohs(len);
+} else if (payload_len == 127) {
+  uint64_t len;
+  recv_exact(client_sock, (char *)&len, 8);
+  payload_len = swap_uint64(len);
+}
+
+if (mask) {
+  recv_exact(client_sock, (char *)masking_key, 4);
+}
+
+recv_exact(client_sock, buffer, (int)payload_len);
+for (int i = 0; i < to_read; i++) {
+  buffer[i] ^= masking_key[i % 4];
+}
+```
+
+Safety behavior:
+
+- Rejects payloads larger than internal buffer (`4096` bytes minus terminator).
+- Returns `0` for ping/pong/non-text so event loop can continue without disconnect.
+- Returns `-1` for close/error -> server removes client.
+
+### 19.5 Transport Reliability: Partial I/O and Errors
+
+TCP does not preserve message boundaries; `send` and `recv` may be partial.
+
+- `robust_send()` loops until all bytes are sent or fatal error occurs.
+- `robust_recv()` classifies outcomes:
+  - `>0`: bytes received
+  - `0`: graceful close / reset
+  - `-1`: `WSAEWOULDBLOCK`
+  - `-2`: fatal recv error
+- `recv_exact()` in WebSocket layer repeatedly calls `robust_recv()` to assemble exact header/payload lengths.
+
+Code excerpt:
+
+```c
+int robust_send(SOCKET sockfd, const char *buf, int len) {
+  int total = 0;
+  while (total < len) {
+    int n = send(sockfd, buf + total, len - total, 0);
+    if (n == SOCKET_ERROR) {
+      int err = WSAGetLastError();
+      if (err == WSAEWOULDBLOCK) { Sleep(1); continue; }
+      return -1;
+    }
+    total += n;
+  }
+  return total;
+}
+```
+
+### 19.6 Application Protocol (JSON Over WebSocket)
+
+Defined message types:
+
+- `auth`
+- `register`
+- `auth_response`
+- `location`
+- `subscribe`
+- `error`
+
+Canonical examples used in runtime:
+
+```json
+{
+  "type": "auth",
+  "payload": {
+  "username": "user1",
+  "password": "pass1"
+  }
+}
+```
+
+```json
+{
+  "type": "location",
+  "payload": {
+  "latitude": 28.6139,
+  "longitude": 77.2090,
+  "userId": "user1"
+  }
+}
+```
+
+### 19.7 Auth/Register Path: Browser -> C -> Flask -> SQLite -> C -> Browser
+
+Auth flow:
+
+1. Frontend opens WebSocket and sends `auth` or `register`.
+2. C server `handle_message()` dispatches by `type`.
+3. `handle_auth()` or `handle_register()` posts JSON to Flask.
+4. Flask validates against SQLite and returns JSON.
+5. C server sets `client->authenticated`, `client->user_id`, `client->username` on success.
+6. C server sends `auth_response` frame to browser.
+
+Code excerpt (C):
+
+```c
+if (strcmp(type->valuestring, MSG_TYPE_AUTH) == 0) {
+  handle_auth(client_info, payload);
+} else if (strcmp(type->valuestring, MSG_TYPE_REGISTER) == 0) {
+  handle_register(client_info, payload);
+}
+```
+
+```c
+if (http_post_json("/auth", req_json, resp_json, sizeof(resp_json)) == 0) {
+  /* parse success + user_id from backend response */
+}
+```
+
+Code excerpt (Flask):
+
+```python
+@app.route('/auth', methods=['POST'])
+def auth():
+  data = request.json
+  username = data.get('username')
+  password = data.get('password')
+  pwd_hash = hash_password(password)
+  # query users table and return success + user_id
+```
+
+### 19.8 Authorization Gate and Broadcast Semantics
+
+Authorization rule in server:
+
+- `auth` and `register` allowed before login.
+- Any other type from unauthenticated client => `error` message (`"Authentication required"`).
+
+Location broadcast rule:
+
+- Frame is rebroadcast only if sender is authenticated.
+- Recipients must also be authenticated.
+- Sender does not receive its own broadcast copy.
+
+Code excerpt:
+
+```c
+} else if (!client_info->authenticated) {
+  send_json_response(client_info->sock,
+    "{\"type\":\"error\",\"payload\":{\"message\":\"Authentication required\"}}");
+}
+```
+
+```c
+if (type && strcmp(type->valuestring, MSG_TYPE_LOCATION) == 0) {
+  if (server->clients[i].authenticated) {
+    server_broadcast(server, buffer, sd);
+  }
+}
+```
+
+### 19.9 Persistence Bridge: C -> Flask HTTP Client
+
+For auth/register/location/log, C code uses `http_post_json()`.
+
+Communication characteristics:
+
+- Opens new TCP socket per request.
+- Connects to `127.0.0.1:5000`.
+- Sends HTTP/1.0 request with `Connection: close`.
+- Uses 2s send/recv socket timeouts to prevent infinite blocking.
+- Extracts response body by splitting at `\r\n\r\n`.
+
+Code excerpt:
+
+```c
+setsockopt(client_sock, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
+setsockopt(client_sock, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout));
+
+snprintf(request, sizeof(request),
+  "POST %s HTTP/1.0\r\n"
+  "Host: 127.0.0.1:5000\r\n"
+  "Content-Type: application/json\r\n"
+  "Connection: close\r\n"
+  "Content-Length: %d\r\n\r\n%s",
+  endpoint, payload_len, json_payload);
+```
+
+Flask side deliberately mirrors close behavior:
+
+```python
+@app.after_request
+def force_close_connection(response):
+  response.headers['Connection'] = 'close'
+  return response
+```
+
+### 19.10 Frontend Communication State Machine
+
+Frontend sequence:
+
+1. `connectAndAuth()` creates `new WebSocket('ws://localhost:8080')`.
+2. `onopen` sends `auth`/`register` and starts auth timeout guard.
+3. `onmessage` parses JSON, then routes by message type.
+4. On successful auth:
+   - app enters connected state,
+   - sends `subscribe` message,
+   - starts geolocation watch,
+   - pushes periodic `location` messages.
+5. `onclose` handles cleanup and reconnect metrics.
+
+Code excerpt:
+
+```javascript
+ws = new WebSocket('ws://localhost:8080');
+
+ws.onopen = () => {
+  const msg = {
+    type: authMode === 'register' ? 'register' : 'auth',
+    payload: { username, password }
+  };
+  sendWsPayload(msg);
+};
+
+function emitOwnLocation(lat, lon) {
+  if (state === STATE.CONNECTED && ws && ws.readyState === WebSocket.OPEN) {
+    sendWsPayload({
+      type: 'location',
+      payload: { latitude: lat, longitude: lon, userId: myUsername }
+    });
+  }
+}
+```
+
+### 19.11 Socket Tuning and Communication Impact
+
+`set_socket_options()` applies profile-based options using environment variable `FISAC_SOCKOPTS_PROFILE`.
+
+Applied options:
+
+- `SO_REUSEADDR`: restart resilience after TIME_WAIT.
+- `TCP_NODELAY`: lower latency for small frequent location frames.
+- `SO_KEEPALIVE`: detect dead half-open connections.
+- `SO_RCVBUF`: absorb burst traffic and reduce packet drops/retransmit pressure.
+
+In your evidence, tuned profile improves throughput while keeping latency stable.
+
+### 19.12 Failure Modes and What Actually Happens
+
+1. Invalid JSON from client:
+   - `cJSON_Parse` fails -> message dropped, server keeps running.
+2. Unauthorized location message:
+   - server replies with `error: Authentication required`.
+3. Client sends close frame:
+   - `websocket_frame_recv` returns `-1` -> server closes socket and clears slot.
+4. Backend unavailable:
+   - `http_post_json` fails quickly (2s timeout), auth fails or storage/log write skipped.
+5. Ping frame received:
+   - server responds with pong and keeps connection alive.
+
+### 19.13 Subtle Design Points (Good for Viva Depth)
+
+- Listening socket is non-blocking, accepted sockets are switched to blocking for simpler frame assembly.
+- Event loop monitors readability only; writes happen inline in same thread.
+- `subscribe` currently acts as a logical marker (logged), not a strict server-side channel filter.
+- Location DB insert uses authenticated `user_id` from server state, not frontend `userId` string.
+- Broadcast payload carries raw client JSON, so `userId` displayed on peers is client-provided.
+
+### 19.14 Known Communication Limitations (Say this confidently)
+
+- No TLS (`wss://`) in current localhost demo.
+- C -> Flask bridge is synchronous; slow backend can stall select-loop progress.
+- WebSocket fragmentation continuation frames are not fully reassembled as multi-frame messages.
+- No explicit server-side rate limiter per client.
+
+### 19.15 Teacher Cross-Question Bank (Ready Answers)
+
+Q1. Why use WebSocket instead of polling HTTP?
+
+- Full-duplex low-latency updates with one persistent TCP connection, ideal for continuous location streaming.
+
+Q2. How do you prove the handshake is standards-compliant?
+
+- We compute `Sec-WebSocket-Accept` exactly from `Sec-WebSocket-Key + GUID`, SHA1, then Base64, and return HTTP `101 Switching Protocols`.
+
+Q3. How are partial TCP writes handled?
+
+- `robust_send()` loops until all bytes are transmitted or a fatal socket error occurs.
+
+Q4. How are partial TCP reads handled for frame decoding?
+
+- `recv_exact()` repeatedly reads until exact header/payload bytes are assembled.
+
+Q5. What enforces authorization?
+
+- Message dispatcher allows only `auth/register` pre-login; all other message types from unauthenticated clients are rejected with `error`.
+
+Q6. Can unauthenticated clients receive broadcasts?
+
+- No. Broadcast loop sends only to slots marked `authenticated`.
+
+Q7. Where does persistence happen?
+
+- C server sends HTTP JSON to Flask endpoints (`/auth`, `/register`, `/location`, `/log`), and Flask writes into SQLite.
+
+Q8. Why use HTTP/1.0 and `Connection: close` between C and Flask?
+
+- Simpler implementation with deterministic request lifecycle and no keep-alive state complexity in C.
+
+Q9. What happens if Flask is down?
+
+- HTTP calls fail quickly due to 2-second socket timeouts; auth fails gracefully and server remains alive.
+
+Q10. Why choose `select()` model?
+
+- Single-threaded I/O multiplexing avoids lock complexity and race bugs, suitable for this workload and project scale.
+
+Q11. Is your protocol binary or text?
+
+- Text WebSocket frames carrying JSON payloads.
+
+Q12. How do you handle keep-alive at WebSocket level?
+
+- Ping (`opcode 9`) is answered with pong (`opcode 10`).
+
+Q13. How is dead peer detection done at TCP level?
+
+- `SO_KEEPALIVE` is enabled, helping OS-level detection of half-open dead sockets.
+
+Q14. Any mismatch risk in identity fields?
+
+- DB writes use server-authenticated `user_id`; however broadcast payload includes client-supplied `userId` string for UI labeling.
+
+Q15. What is your strongest communication bottleneck today?
+
+- Synchronous HTTP bridge from C to Flask in the same event-thread, which can add head-of-line blocking under backend delay.
+
+### 19.16 Code Map for Instant Navigation
+
+- Event loop and client lifecycle: `src/server.c`
+- WebSocket handshake and frame I/O: `src/websocket.c`
+- Message dispatch and auth gate: `src/protocol.c`
+- TCP send/recv reliability wrappers: `src/network.c`
+- Socket tuning profile and options: `src/socket.c`
+- C -> Flask HTTP bridge: `src/http_client.c`
+- Backend endpoints and DB persistence: `scripts/service.py`
+- Browser WebSocket state machine and message send/receive: `frontend/app.js`
+

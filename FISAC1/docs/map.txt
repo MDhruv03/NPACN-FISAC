@@ -1,34 +1,348 @@
-Question -
+Markdown version available at: docs/map.md
+
+Question
 Group-12: Design and implement a secure real-time Location Sharing Web Application where authenticated users broadcast live coordinates to a central server, and the server instantly distributes updates to authorized connected clients using WebSockets over TCP.
 
-Required outcomes:
+Required outcomes
 1. Analyze complete TCP + WebSocket workflow: secure setup, handshake, full-duplex exchange, graceful termination, and concurrency model justification.
 2. Implement concurrent authenticated server with continuous location ingestion, persistent timestamped storage, syslog events, and efficient broadcast while handling partial transmissions and latency.
 3. Configure and evaluate SO_REUSEADDR, SO_KEEPALIVE, SO_RCVBUF, TCP_NODELAY; analyze latency, throughput, session behavior, and write performance.
 4. Evaluate robustness under disconnects, high-frequency updates, congestion, and unauthorized attempts; analyze TIME_WAIT/CLOSE_WAIT behavior, log correctness, and DB consistency.
 
-Current system architecture (implemented):
+Implemented runtime architecture
 [Frontend Browser]
-    <-> WebSocket (TCP 8080)
+        <-> WebSocket (TCP 8080)
 [C Server: select()-based concurrent loop]
-    <-> HTTP loopback (127.0.0.1:5000)
+        <-> HTTP loopback (127.0.0.1:5000)
 [Python Service Layer]
-    <-> SQLite persistent storage
+        <-> SQLite persistent storage
 
-Project status notes:
-- Authentication, location ingest, broadcast path, and persistence are implemented.
-- Socket options are implemented in server socket setup.
-- Load/chaos/log-analysis scripts are present under scripts/.
-- Remaining report work should focus on measurement tables, robustness evidence, and concise workflow analysis.
+==================================================
+EXPANDED DEFENSE NOTES (OUTCOMES + CODE + DEMOS)
+==================================================
 
-Handwritten split among 3 members:
-- Member 1 -> Question 1 (TCP + WebSocket workflow + concurrency model justification)
-- Member 2 -> Question 2 (Concurrent authenticated server + persistence + syslogs + broadcast)
-- Member 3 -> Questions 3 and 4 (Socket option evaluation + robustness/TCP state analysis)
+OUTCOME 1: TCP + WebSocket workflow and concurrency model
 
-Evidence scripts for screenshots:
+What we implemented
+- TCP connection acceptance and WebSocket upgrade in C server event loop.
+- RFC6455 handshake (Sec-WebSocket-Key -> SHA1 -> Base64 -> Sec-WebSocket-Accept).
+- Full-duplex frame exchange: auth/register/location/subscribe/error.
+- Graceful close handling (close frame + socket cleanup).
+- Single-threaded select()-based multiplexing for concurrent clients.
+
+Code anchors to cite in viva
+- src/server.c: server_run()
+    - accept new sockets, handshake, track clients[], route readable sockets.
+- src/websocket.c: websocket_handshake()
+    - computes Sec-WebSocket-Accept and returns HTTP/1.1 101 response.
+- src/websocket.c: websocket_frame_recv()/websocket_frame_send()
+    - full frame decode/encode and ping/pong handling.
+
+Compact code evidence
+```c
+/* src/server.c */
+int activity = select(0, &readfds, NULL, NULL, &timeout);
+if (FD_ISSET(server->sock, &readfds)) {
+        SOCKET new_socket = accept(server->sock, ...);
+        if (websocket_handshake(new_socket) == 0) {
+                server->clients[i].sock = new_socket;
+        }
+}
+```
+
+```c
+/* src/websocket.c */
+snprintf(concatenated_key, sizeof(concatenated_key), "%s%s", key_start, WEBSOCKET_GUID);
+sha1_update(&sha1_ctx, (uint8_t *)concatenated_key, (int)strlen(concatenated_key));
+base64_encode(sha1_digest, SHA1_DIGEST_SIZE, base64_encoded);
+```
+
+Why this satisfies outcome 1
+- Shows complete connection lifecycle: TCP connect -> WS upgrade -> message exchange -> disconnect cleanup.
+- Concurrency justification: select() is predictable and low-overhead for I/O-bound workloads.
+
+Evidence to show
+- docs/q1_workflow_capture.txt (connect + handshake + auth response)
+- docs/evidence/q4_netstat_8080.txt (socket state visibility)
+
+
+OUTCOME 2: Concurrent authenticated server + persistence + syslog + broadcast
+
+What we implemented
+- Authentication/registration over WebSocket messages.
+- Auth gate blocks all non-auth/register traffic before login.
+- Continuous location ingestion path into SQLite via backend /location endpoint.
+- Event syslogs stored through backend /log endpoint.
+- Broadcast fanout from one authenticated sender to other authenticated peers.
+
+Code anchors to cite in viva
+- src/protocol.c: handle_message()
+    - auth/register allowed pre-auth; unauthorized messages rejected.
+- src/protocol.c: handle_auth(), handle_register(), handle_location(), log_event().
+- src/server.c: server_broadcast()
+    - sends location frame to authenticated clients only (excluding sender).
+- scripts/service.py: /auth, /register, /location, /log
+    - persistent storage in users, locations, logs tables.
+
+Compact code evidence
+```c
+/* src/protocol.c */
+} else if (!client_info->authenticated) {
+        send_json_response(client_info->sock,
+            "{\"type\":\"error\",\"payload\":{\"message\":\"Authentication required\"}}");
+}
+```
+
+```c
+/* src/server.c */
+if (type && strcmp(type->valuestring, MSG_TYPE_LOCATION) == 0) {
+        if (server->clients[i].authenticated) {
+                server_broadcast(server, buffer, sd);
+        }
+}
+```
+
+```python
+# scripts/service.py
+@app.route('/location', methods=['POST'])
+def location():
+        conn.execute("INSERT INTO locations (user_id, latitude, longitude) VALUES (?, ?, ?)", ...)
+```
+
+Why this satisfies outcome 2
+- Concurrent socket loop is active while auth, location persistence, and broadcast are all functioning.
+- Logs and DB rows provide traceability for each major event.
+
+Evidence to show
+- docs/evidence/q2_db_snapshot.txt
+    - users=32, locations=1978, logs=1764 (snapshot timestamped)
+
+
+OUTCOME 3: Socket options configuration and evaluation
+
+What we implemented
+- Profile-driven socket configuration using FISAC_SOCKOPTS_PROFILE.
+- Baseline and tuned runs are reproducible through run_all.bat and scripts/profile_eval.py.
+- Option set evaluated:
+    - SO_REUSEADDR
+    - SO_KEEPALIVE
+    - SO_RCVBUF
+    - TCP_NODELAY
+
+Code anchors to cite in viva
+- src/socket.c: set_socket_options()
+    - toggles options based on baseline/tuned profile.
+- run_all.bat
+    - injects profile into both backend and server process environment.
+- scripts/profile_eval.py
+    - automates baseline vs tuned run and emits docs/evidence/load_*.json.
+
+Measured output (from docs/evidence/q3_q4_summary.json)
+- Throughput: baseline 10.73 msg/s -> tuned 13.84 msg/s (about +29.0%)
+- p95 latency: baseline 1.16 ms -> tuned 1.07 ms (about -8.0%)
+- Mean send latency: baseline 0.324 ms -> tuned 0.244 ms
+- Errors: baseline 2, tuned 2 (stable)
+
+Why this satisfies outcome 3
+- Options are not only configured but compared under controlled load script runs.
+- Performance claims are backed by JSON evidence artifacts.
+
+Evidence to show
+- docs/evidence/load_baseline.json
+- docs/evidence/load_tuned.json
+- docs/evidence/q3_q4_summary.json
+
+
+OUTCOME 4: Robustness under failures and abnormal traffic
+
+What we implemented
+- Flood, unauthorized access, invalid credentials, rapid reconnect, malformed payload, idle-delay scenarios.
+- Connection cleanup in server loop prevents lingering dead client state.
+- TIME_WAIT and CLOSE_WAIT state check included in generated evidence summary.
+
+Code anchors to cite in viva
+- scripts/chaos_test.py
+    - test_message_flood, test_unauthorized_access, test_invalid_credentials,
+        test_rapid_connect_disconnect, test_malformed_messages, test_artificial_delay.
+- src/server.c disconnect path
+    - closesocket(sd) and clears client slot on frame recv failure.
+- src/network.c robust_send()/robust_recv()
+    - partial I/O and transient/fatal socket error handling.
+
+Measured robustness output
+- flood_sent: 200
+- unauthorized_attempts: 2
+- rapid_connect_disconnect: 45
+- malformed_sent: 0 (in saved summary file)
+- errors: 13
+- tcp_states: time_wait_8080=1, close_wait_8080=0
+
+Why this satisfies outcome 4
+- Robustness is measured with adversarial scenarios, not only normal demo use.
+- TCP state evidence supports cleanup correctness (no CLOSE_WAIT buildup).
+
+Evidence to show
+- docs/evidence/chaos_tuned.json
+- docs/evidence/q3_q4_summary.json
+- docs/evidence/q4_netstat_8080.txt
+
+
+==================================================
+EXTRA FEATURES IMPLEMENTED BEYOND MINIMUM REQUIRED APP
+==================================================
+
+Frontend experience and observability upgrades
+- Q1-Q4 alignment board (real-time assignment readiness status)
+- Workflow timeline (connected/auth/subscribed/streaming state markers)
+- Live highlights:
+    - session distance (haversine-based)
+    - updates per minute
+    - peak peers
+    - event count
+- Robustness counters:
+    - reconnect count
+    - auth fail count
+    - malformed payload count
+    - geolocation fallback count
+- Backend evidence panel with periodic /stats polling
+- Protocol inspector showing last TX and last RX JSON payloads
+- Trail rendering for self and peer movement paths
+- Snapshot export button generates local JSON report of session state
+
+Operational/testing extras
+- run_all.bat orchestration with profile switching and auto browser launch
+- Baseline/tuned performance automation (scripts/profile_eval.py)
+- Dedicated chaos robustness harness (scripts/chaos_test.py)
+- Load harness with concurrent simulated users (scripts/load_test.py)
+- Evidence artifacts auto-written under docs/evidence/
+
+Why these extras matter
+- They convert the project from only "working" to "measurable, explainable, and demo-ready".
+
+
+==================================================
+FRONTEND DEMO SCENARIOS: WHAT HAPPENS END-TO-END
+==================================================
+
+1) Start Demo Route
+- Trigger: frontend button -> toggleDemoRoute() in frontend/app.js
+- Client behavior:
+    - disables geolocation watch
+    - emits synthetic orbit coordinates every 1200 ms
+    - each point sent as location frame
+- Server/backend behavior:
+    - normal authenticated location handling, persistence, broadcast
+- Visible output:
+    - marker moves in smooth loop
+    - trail grows
+    - TX/RX and updates/min metrics increase
+- Best explanation line:
+    - "This gives deterministic movement so we can demonstrate the full ingest+broadcast path even if GPS is unstable."
+
+2) Run Burst x25
+- Trigger: runBurstTest() in frontend/app.js
+- Client behavior:
+    - sends 25 location frames immediately around current anchor point
+- Server/backend behavior:
+    - frame parsing + auth checks + location inserts + broadcast fanout spike
+- Visible output:
+    - TX jumps by 25
+    - log stream grows quickly
+    - peer markers/trails update in burst
+- Best explanation line:
+    - "This is a controlled mini stress case to illustrate high-frequency update handling."
+
+3) Send Malformed Payload
+- Trigger: sendMalformedPayload() in frontend/app.js
+- Client behavior:
+    - writes deliberately broken JSON string onto WebSocket
+- Server/backend behavior:
+    - cJSON parse fails in handle_message(); message dropped; server stays alive
+- Visible output:
+    - frontend malformed counter increments
+    - connection remains usable
+- Best explanation line:
+    - "Malformed traffic is rejected without killing the session, showing parser resilience."
+
+4) Run Reconnect Drill
+- Trigger: runReconnectDrill() in frontend/app.js
+- Client behavior:
+    - force-closes current socket
+    - reopens socket and replays last credentials
+- Server/backend behavior:
+    - old connection cleaned up, new handshake/auth path executed
+- Visible output:
+    - reconnect counter increments
+    - workflow timeline replays connect -> auth -> subscribed -> streaming
+- Best explanation line:
+    - "This demonstrates recovery behavior after transient disconnects."
+
+5) Clear Trails
+- Trigger: clearTrails() in frontend/app.js
+- Client behavior:
+    - resets local polyline arrays and distance metric
+- Server/backend behavior:
+    - none (visual reset only)
+- Visible output:
+    - map trails cleared immediately
+- Best explanation line:
+    - "This is a demo reset utility and does not alter server-side data."
+
+6) Export Snapshot
+- Trigger: exportSessionSnapshot() in frontend/app.js
+- Client behavior:
+    - builds structured JSON with metrics, backend evidence, peers, protocol traces
+    - downloads geosync-session-<timestamp>.json
+- Server/backend behavior:
+    - none at export moment; uses latest cached UI stats
+- Visible output:
+    - downloadable audit artifact generated in browser
+- Best explanation line:
+    - "This gives us reproducible proof of live session state at demo time."
+
+7) Geolocation denied/failure fallback (implicit scenario)
+- Trigger: geolocation error callback in startSharing()
+- Client behavior:
+    - increments fallback counter
+    - emits simulated nearby coordinates
+- Server/backend behavior:
+    - same location persistence+broadcast path continues
+- Visible output:
+    - demo still works even without browser GPS permission
+- Best explanation line:
+    - "The demo remains operational despite environment limitations."
+
+
+==================================================
+FAST CODE MAP FOR QUESTION DEFENSE
+==================================================
+
+- src/server.c
+    - server_init, server_run, server_broadcast, server_shutdown
+- src/websocket.c
+    - websocket_handshake, websocket_frame_recv, websocket_frame_send
+- src/network.c
+    - robust_send, robust_recv
+- src/socket.c
+    - set_socket_options (baseline/tuned switch)
+- src/protocol.c
+    - handle_message, handle_auth, handle_register, handle_location, log_event
+- scripts/service.py
+    - /auth, /register, /location, /log, /stats
+- frontend/app.js
+    - connectAndAuth, sendWsPayload, startSharing, demo actions, metrics update
+- run_all.bat
+    - compile/start orchestration + profile propagation
+
+
+Presentation-ready split among members
+- Member 1 -> Outcome 1 (workflow + handshake + select concurrency)
+- Member 2 -> Outcome 2 (auth/storage/syslog/broadcast path)
+- Member 3 -> Outcomes 3 and 4 (socket tuning metrics + robustness)
+
+Evidence scripts for quick reruns
 - Q1: python scripts/q1_workflow_capture.py
-- Q2: run_all.bat --no-pause tuned (show login + location update + DB/log entries)
-- Q3/Q4: python scripts/profile_eval.py (generates docs/evidence/*.json)
+- Q2: run_all.bat --no-pause tuned
+- Q3/Q4: python scripts/profile_eval.py
 
 
